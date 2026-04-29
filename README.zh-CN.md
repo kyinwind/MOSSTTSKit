@@ -2,34 +2,35 @@
 
 [English](./README.md) | [简体中文](./README.zh-CN.md)
 
-MOSSTTSKit is a Swift Package wrapper for MOSS-TTS-Nano ONNX models.
+MOSSTTSKit 是一个基于 ONNX Runtime 的 MOSS-TTS-Nano Swift Package。
 
-Current package scope:
+当前能力范围：
 
-- Download and cache the MOSS-TTS-Nano TTS model files from HuggingFace.
-- Download and cache the MOSS Audio Tokenizer ONNX model files from HuggingFace.
-- Initialize from either cached/downloaded models or explicit local model directories.
-- Load text tokenizer and audio tokenizer models.
-- Expose speaker presets and a `makeSpeaker(name:referenceAudioURL:)` API that encodes reference audio into acoustic codes for voice cloning.
-- Provide a real ONNX Runtime backed `ONNXSession` wrapper for generic tensor inference.
-- Run a verified real-model preview path: prefill, global decode step, fixed frame sampler, and audio tokenizer decode for the first generated acoustic frame.
+- 从 HuggingFace 自动下载并缓存 MOSS-TTS-Nano TTS 模型
+- 从 HuggingFace 自动下载并缓存 MOSS Audio Tokenizer 模型
+- 支持“自动下载后初始化”或“指定本地模型目录初始化”
+- 加载文本 tokenizer 与音频 tokenizer
+- 提供内置音色，以及 `makeSpeaker(name:referenceAudioURL:)` 语音克隆入口
+- 提供基于 ONNX Runtime 的通用 `ONNXSession` 推理封装
+- 提供真实模型驱动的多帧 TTS 生成路径
 
-## Usage
+## 基本用法
 
 ```swift
 import MOSSTTSKit
 
 let tts = try await MOSSTTSKit()
 let result = try await tts.speak(text: "你好，欢迎使用 MOSS-TTS-Nano。")
+
 try await tts.speakToFile(
     text: "保存成 WAV 文件。",
     outputURL: URL(fileURLWithPath: "/tmp/moss.wav")
 )
 ```
 
-## Automatic Model Download
+## 自动下载模型
 
-`MOSSTTSKit()` enables automatic model download by default.
+`MOSSTTSKit()` 默认会自动下载模型。
 
 ```swift
 let tts = try await MOSSTTSKit(
@@ -42,12 +43,12 @@ let tts = try await MOSSTTSKit(
 )
 ```
 
-Default cache location:
+默认缓存目录：
 
 - macOS: `~/Library/Caches/MOSSTTSKit/Models`
 - iOS: `<App Sandbox>/Library/Caches/MOSSTTSKit/Models`
 
-Default downloaded folders:
+默认下载后的目录结构：
 
 ```text
 .../MOSSTTSKit/Models/
@@ -55,7 +56,7 @@ Default downloaded folders:
 └── MOSS-Audio-Tokenizer-Nano-ONNX/
 ```
 
-Use a custom cache directory:
+自定义缓存目录：
 
 ```swift
 let tts = try await MOSSTTSKit(
@@ -66,7 +67,7 @@ let tts = try await MOSSTTSKit(
 )
 ```
 
-Preload models before first synthesis:
+提前预下载模型：
 
 ```swift
 try await MOSSTTSKit.preload { progress in
@@ -74,7 +75,7 @@ try await MOSSTTSKit.preload { progress in
 }
 ```
 
-Disable automatic download and require cached models:
+关闭自动下载，仅使用已缓存模型：
 
 ```swift
 let tts = try await MOSSTTSKit(
@@ -82,7 +83,7 @@ let tts = try await MOSSTTSKit(
 )
 ```
 
-Check and clear cache:
+检查和清理缓存：
 
 ```swift
 let cached = await MOSSTTSKit.isModelCached()
@@ -90,21 +91,21 @@ let cacheSize = await MOSSTTSKit.cacheSize()
 try await MOSSTTSKit.clearCache()
 ```
 
-## TTSMate Integration
+## TTSMate 接入建议
 
-Recommended first-pass integration for TTSMate:
+推荐先用一轮最小接入测试把链路跑通。
 
-1. Add the Swift Package dependency:
+1. 添加本地 Swift Package 依赖：
 
 ```swift
 .package(path: "/Users/yangxuehui/Documents/dev/MOSSTTSKit/MOSSTTSKit")
 ```
 
-2. Add `MOSSTTSKit` to the TTSMate target dependencies.
+2. 把 `MOSSTTSKit` 加到 TTSMate target 依赖里。
 
-3. For the first integration pass, either use explicit local model directories or keep auto-download on and surface the progress callback in the UI.
+3. 第一轮接入可以二选一：
 
-Auto-download version:
+自动下载版本：
 
 ```swift
 import MOSSTTSKit
@@ -120,7 +121,7 @@ let tts = try await MOSSTTSKit(
 )
 ```
 
-Explicit local-directory version:
+本地目录版本：
 
 ```swift
 import MOSSTTSKit
@@ -132,7 +133,7 @@ let tts = try await MOSSTTSKit(
 )
 ```
 
-4. Smoke test with a short sentence:
+4. 短句 smoke test：
 
 ```swift
 let result = try await tts.speak(text: "你好，这是 TTSMate 集成测试。")
@@ -140,7 +141,7 @@ print(result.audioSamples.count)
 print(result.sampleRate)
 ```
 
-5. Show progress and allow cancel:
+5. 带进度和取消：
 
 ```swift
 let result = try await tts.speak(
@@ -152,7 +153,7 @@ let result = try await tts.speak(
 }
 ```
 
-6. Try streaming playback:
+6. 流式播放：
 
 ```swift
 let stream = try await tts.speakStream(
@@ -162,19 +163,19 @@ let stream = try await tts.speakStream(
 
 for try await chunk in stream {
     if chunk.isFinal { break }
-    // Feed chunk.newAudioSamples into your player/buffer here.
+    // 在这里把 chunk.newAudioSamples 喂给播放器或缓冲区
     print("chunk samples:", chunk.newAudioSamples.count)
 }
 ```
 
-7. Enumerate built-in voices:
+7. 获取内置音色：
 
 ```swift
 let speakers = await tts.availableSpeakers
 print(speakers.map(\.name))
 ```
 
-8. Build a cloned speaker from a reference WAV:
+8. 用参考音频创建克隆音色：
 
 ```swift
 let speaker = try await tts.makeSpeaker(
@@ -189,15 +190,16 @@ let cloned = try await tts.speak(
 )
 ```
 
-Integration notes:
+接入建议：
 
-- Start with `maxGeneratedFrames: 3` or `8` for the first UI test.
-- Default auto-download cache on macOS is `~/Library/Caches/MOSSTTSKit/Models`.
-- `speakStream(...)` is the best fit if TTSMate wants progressive playback.
-- `speak(...)` is better for a quick blocking smoke test.
-- The package currently uses a bounded real-generation path and is suitable for integration testing, but still needs longer-text performance tuning before calling it a fully polished production pipeline.
+- 第一轮 UI 测试建议先用 `maxGeneratedFrames: 3` 或 `8`
+- 如果要边生成边播放，优先接 `speakStream(...)`
+- 如果只想先确认链路能跑通，优先接 `speak(...)`
+- 当前版本已经适合做集成测试，但长文本性能和更完整的播放体验还需要继续打磨
 
-Limiting generated frames and observing progress:
+## 更多用法
+
+限制生成帧数并观察进度：
 
 ```swift
 let shortOptions = MOSSTTSOptions(maxGeneratedFrames: 8)
@@ -210,7 +212,7 @@ let preview = try await tts.speak(
 }
 ```
 
-Streaming audio chunks:
+流式输出音频 chunk：
 
 ```swift
 let stream = try await tts.speakStream(
@@ -224,7 +226,7 @@ for try await chunk in stream {
 }
 ```
 
-Using local model directories:
+使用本地模型目录：
 
 ```swift
 let tts = try await MOSSTTSKit(
@@ -233,7 +235,7 @@ let tts = try await MOSSTTSKit(
 )
 ```
 
-Preparing a cloned speaker:
+准备克隆音色：
 
 ```swift
 let speaker = try await tts.makeSpeaker(
@@ -244,9 +246,9 @@ let speaker = try await tts.makeSpeaker(
 let cloned = try await tts.speak(text: "使用参考音频音色。", speaker: speaker)
 ```
 
-## Model Files
+## 模型文件
 
-Default cache layout:
+默认缓存目录结构：
 
 ```text
 ~/Library/Caches/MOSSTTSKit/Models/
@@ -270,38 +272,31 @@ Default cache layout:
     └── codec_browser_onnx_meta.json
 ```
 
-The built-in downloader now writes `.partial` files and resumes interrupted downloads when the server supports HTTP range requests. If the network is unstable, you can manually download the files from:
+内置下载器会先写入 `.partial` 临时文件，并在服务端支持 HTTP Range 时尝试断点续传。如果网络不稳定，也可以手动下载：
 
 - `https://huggingface.co/OpenMOSS-Team/MOSS-TTS-Nano-100M-ONNX`
 - `https://huggingface.co/OpenMOSS-Team/MOSS-Audio-Tokenizer-Nano-ONNX`
 
-Then either place them in the default cache layout above, let `MOSSTTSKit()` auto-download into that cache, or pass explicit directories to:
+你可以：
 
-```swift
-let tts = try await MOSSTTSKit(
-    ttsModelDir: URL(fileURLWithPath: "/path/to/MOSS-TTS-Nano-100M-ONNX"),
-    audioTokenizerDir: URL(fileURLWithPath: "/path/to/MOSS-Audio-Tokenizer-Nano-ONNX")
-)
-```
+- 让 `MOSSTTSKit()` 自动下载到默认缓存目录
+- 提前调用 `MOSSTTSKit.preload(...)` 预下载
+- 手动放到默认缓存目录
+- 或者在初始化时传入本地模型目录
 
-Inspect model input/output metadata after files are available:
+## 状态
 
-```bash
-swift run mosstts-inspect
-swift run mosstts-inspect /path/to/MOSS-TTS-Nano-100M-ONNX /path/to/MOSS-Audio-Tokenizer-Nano-ONNX
-```
+当前包已经可以：
 
-## Status
+- 完成模型自动下载和缓存
+- 支持本地模型目录初始化
+- 跑真实 ONNX 多帧生成
+- 支持 `speak(...)` 一次性生成
+- 支持 `speakStream(...)` 流式输出
+- 支持进度回调和取消
 
-The package builds and its unit tests pass. ONNX Runtime is integrated for generic sessions, the audio tokenizer path calls real ORT sessions, and real-model integration tests cover the first generated acoustic frame.
+当前仍需继续完善的方向：
 
-The package also parses `browser_poc_manifest.json`, builds the MOSS-TTS prefill request rows that combine text tokens and reference audio codes, and exposes `MOSSTTSEngine.generateFirstAudioFrame(...)` as a small real-generation slice. `MOSSTTSEngine.generateAudioCodes(...)` runs a bounded multi-frame continuation loop. `MOSSTTSKit.speak(...)` now uses that real multi-frame path. The default `MOSSTTSOptions.maxGeneratedFrames` is 32 for early integration safety; callers can raise or lower it. `MOSSTTSKit.speakStream(...)` exposes decoded audio chunks as an `AsyncThrowingStream`.
-
-The ONNX model repository ships `tokenizer.model` without `tokenizer.json` / `tokenizer_config.json`; MOSSTTSKit currently falls back to the model's byte-token range for offline local initialization. A true SentencePiece parser is still needed for exact tokenizer parity.
-
-The remaining major task is to make the full MOSS-TTS autoregressive inference loop production-ready by adding streaming audio output, validating longer generation performance, and polishing:
-
-- `moss_tts_decode_step.onnx`
-- `moss_tts_local_decoder.onnx`
-- `moss_tts_local_cached_step.onnx`
-- `moss_tts_local_fixed_sampled_frame.onnx`
+- 更长文本的性能优化
+- 更细粒度的流式播放/缓冲策略
+- 更严格的 SentencePiece tokenizer 对齐
