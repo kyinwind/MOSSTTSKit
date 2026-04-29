@@ -1,0 +1,46 @@
+// swift-tools-version: 6.0
+
+import PackageDescription
+
+let package = Package(
+    name: "MOSSTTSKit",
+    platforms: [
+        .macOS(.v14),
+        .iOS(.v15)
+    ],
+    products: [
+        .library(
+            name: "MOSSTTSKit",
+            targets: ["MOSSTTSKit"]
+        ),
+        .executable(
+            name: "mosstts-inspect",
+            targets: ["MOSSTTSInspect"]
+        ),
+    ],
+    dependencies: [
+        // HuggingFace Transformers Swift (for Hub and Tokenizers)
+        .package(url: "https://github.com/huggingface/swift-transformers.git", from: "1.1.6"),
+        // ONNX Runtime Swift (Microsoft 官方)
+        // 注意：产品名是 "onnxruntime"（静态库），它暴露 OnnxRuntimeBindings 模块
+        .package(url: "https://github.com/microsoft/onnxruntime-swift-package-manager.git", from: "1.24.2"),
+    ],
+    targets: [
+        .target(
+            name: "MOSSTTSKit",
+            dependencies: [
+                .product(name: "Hub", package: "swift-transformers"),
+                .product(name: "Tokenizers", package: "swift-transformers"),
+                .product(name: "onnxruntime", package: "onnxruntime-swift-package-manager"),
+            ]
+        ),
+        .testTarget(
+            name: "MOSSTTSKitTests",
+            dependencies: ["MOSSTTSKit"]
+        ),
+        .executableTarget(
+            name: "MOSSTTSInspect",
+            dependencies: ["MOSSTTSKit"]
+        ),
+    ]
+)
