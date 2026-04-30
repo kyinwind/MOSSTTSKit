@@ -13,10 +13,6 @@ let package = Package(
             name: "MOSSTTSKit",
             targets: ["MOSSTTSKit"]
         ),
-        .executable(
-            name: "mosstts-inspect",
-            targets: ["MOSSTTSInspect"]
-        ),
     ],
     dependencies: [
         // HuggingFace Transformers Swift (for Hub and Tokenizers)
@@ -36,10 +32,6 @@ let package = Package(
         ),
         .testTarget(
             name: "MOSSTTSKitTests",
-            dependencies: ["MOSSTTSKit"]
-        ),
-        .executableTarget(
-            name: "MOSSTTSInspect",
             dependencies: ["MOSSTTSKit"]
         ),
     ]

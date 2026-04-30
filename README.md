@@ -284,12 +284,7 @@ let tts = try await MOSSTTSKit(
 )
 ```
 
-Inspect model input/output metadata after files are available:
-
-```bash
-swift run mosstts-inspect
-swift run mosstts-inspect /path/to/MOSS-TTS-Nano-100M-ONNX /path/to/MOSS-Audio-Tokenizer-Nano-ONNX
-```
+For now, model inspection is an internal development helper and is not exported as a package product. App integrations such as TTSMate only need the library product `MOSSTTSKit`.
 
 ## Status
 
