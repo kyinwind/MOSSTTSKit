@@ -25,6 +25,12 @@ public struct MOSSTTSOptions: Sendable, Equatable {
     /// MOSS Audio Tokenizer 每帧约 80ms (48kHz / 3840 samples)。默认使用较保守的
     /// 32 帧，便于客户端早期接入测试；调用方可按需要调高。
     public var maxGeneratedFrames: Int?
+
+    /// 采样随机种子。
+    ///
+    /// MOSS-TTS-Nano 官方 ONNX runtime 默认使用固定 seed，因此这里也默认使用 `1234`，
+    /// 以获得更稳定、可复现的 fixed-sampling 输出。
+    public var seed: UInt64?
     
     /// 批量大小 (用于批处理优化)
     public var batchSize: Int
@@ -76,6 +82,7 @@ public struct MOSSTTSOptions: Sendable, Equatable {
         topK: 20,
         maxLength: 5000,
         maxGeneratedFrames: 16,
+        seed: 1234,
         batchSize: 1,
         sampleRate: 24000,
         channels: 1,
@@ -91,6 +98,7 @@ public struct MOSSTTSOptions: Sendable, Equatable {
         topK: 100,
         maxLength: 20000,
         maxGeneratedFrames: 375,
+        seed: 1234,
         batchSize: 4,
         sampleRate: 48000,
         channels: 2,
@@ -106,6 +114,7 @@ public struct MOSSTTSOptions: Sendable, Equatable {
         topK: Int = 50,
         maxLength: Int = 10000,
         maxGeneratedFrames: Int? = 32,
+        seed: UInt64? = 1234,
         batchSize: Int = 1,
         sampleRate: Int = 48000,
         channels: Int = 2,
@@ -118,6 +127,7 @@ public struct MOSSTTSOptions: Sendable, Equatable {
         self.topK = topK
         self.maxLength = maxLength
         self.maxGeneratedFrames = maxGeneratedFrames
+        self.seed = seed
         self.batchSize = batchSize
         self.sampleRate = sampleRate
         self.channels = channels

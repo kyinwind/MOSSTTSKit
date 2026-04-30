@@ -28,7 +28,25 @@ let package = Package(
                 .product(name: "Hub", package: "swift-transformers"),
                 .product(name: "Tokenizers", package: "swift-transformers"),
                 .product(name: "onnxruntime", package: "onnxruntime-swift-package-manager"),
+            ],
+            resources: [
+                .process("Resources")
             ]
+        ),
+        .executableTarget(
+            name: "MOSSTTSSampleCLI",
+            dependencies: ["MOSSTTSKit"],
+            path: "Examples/MOSSTTSSampleCLI"
+        ),
+        .executableTarget(
+            name: "MOSSFrameDumpCLI",
+            dependencies: ["MOSSTTSKit"],
+            path: "Examples/MOSSFrameDumpCLI"
+        ),
+        .executableTarget(
+            name: "MOSSRegressionSamplesCLI",
+            dependencies: ["MOSSTTSKit"],
+            path: "Examples/MOSSRegressionSamplesCLI"
         ),
         .testTarget(
             name: "MOSSTTSKitTests",

@@ -165,11 +165,16 @@ public final class SentencePieceTokenizer: @unchecked Sendable, MOSSTextTokenize
                 spmTokenizer = try await HuggingFaceTextTokenizer.fromLocal(tokenizerPath: path)
                 byteFallbackTokenizer = nil
             } catch {
-                // The ONNX release currently ships a SentencePiece `tokenizer.model` without
-                // tokenizer.json/tokenizer_config.json. swift-transformers cannot load that
-                // format directly, so use the model's byte-token range as an offline fallback.
-                spmTokenizer = nil
-                byteFallbackTokenizer = ByteFallbackTextTokenizer()
+                if let bundledTokenizer = try await Self.loadBundledTokenizer() {
+                    spmTokenizer = bundledTokenizer
+                    byteFallbackTokenizer = nil
+                } else {
+                    // The ONNX release currently ships a SentencePiece `tokenizer.model` without
+                    // tokenizer.json/tokenizer_config.json. If the packaged fallback tokenizer
+                    // resources are unavailable, use the model's byte-token range as a last resort.
+                    spmTokenizer = nil
+                    byteFallbackTokenizer = ByteFallbackTextTokenizer()
+                }
             }
         } else {
             spmTokenizer = try await HuggingFaceTextTokenizer.fromPretrained(modelName: modelName)
@@ -197,6 +202,19 @@ public final class SentencePieceTokenizer: @unchecked Sendable, MOSSTextTokenize
         }
         
         throw MOSSTTSError.tokenizerNotFound("Tokenizer not loaded")
+    }
+
+    private static func loadBundledTokenizer() async throws -> HuggingFaceTextTokenizer? {
+        guard let resourceURL = Bundle.module.resourceURL else {
+            return nil
+        }
+        let tokenizerJSONPath = resourceURL.appendingPathComponent("tokenizer.json").path
+        let tokenizerConfigPath = resourceURL.appendingPathComponent("tokenizer_config.json").path
+        guard FileManager.default.fileExists(atPath: tokenizerJSONPath),
+              FileManager.default.fileExists(atPath: tokenizerConfigPath) else {
+            return nil
+        }
+        return try await HuggingFaceTextTokenizer.fromLocal(tokenizerPath: resourceURL.path)
     }
 }
 

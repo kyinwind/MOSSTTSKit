@@ -281,7 +281,8 @@ public actor MOSSTTSEngine {
         textTokenIds: [Int32],
         promptAudioCodes: [[Int32]],
         manifest: MOSSBrowserManifest,
-        assistantRandomU: Float = 0.5,
+        seed: UInt64? = nil,
+        assistantRandomU: Float? = nil,
         audioRandomU: [Float]? = nil
     ) throws -> FirstAudioFrameResult {
         guard case .ready = state else {
@@ -310,10 +311,16 @@ public actor MOSSTTSEngine {
             inputIds: promptRows.inputIds,
             attentionMask: promptRows.attentionMask
         )
+        var rng = seed.map(SplitMix64.init)
+        let samplerInputs = try resolveSamplerRandomInputs(
+            assistantRandomU: assistantRandomU,
+            audioRandomU: audioRandomU,
+            rng: &rng
+        )
         let sampled = try runFixedSampledFrame(
             globalHidden: try extractLastHidden(prefill.globalHidden, shape: prefill.globalHiddenShape),
-            assistantRandomU: assistantRandomU,
-            audioRandomU: audioRandomU
+            assistantRandomU: samplerInputs.assistantRandomU,
+            audioRandomU: samplerInputs.audioRandomU
         )
         
         return FirstAudioFrameResult(
@@ -335,7 +342,8 @@ public actor MOSSTTSEngine {
         promptAudioCodes: [[Int32]],
         manifest: MOSSBrowserManifest,
         maxFrames: Int,
-        assistantRandomU: Float = 0.5,
+        seed: UInt64? = nil,
+        assistantRandomU: Float? = nil,
         audioRandomU: [Float]? = nil,
         stopOnShouldContinue: Bool = true,
         progressCallback: MOSSProgressCallback = nil
@@ -377,13 +385,19 @@ public actor MOSSTTSEngine {
         var repetitionSeenMask = [Int32](repeating: 0, count: manifest.ttsConfig.nVq * 1024)
         var generatedCodes: [[Int32]] = []
         var didReachStop = false
+        var rng = seed.map(SplitMix64.init)
         
         for _ in 0..<maxFrames {
+            let samplerInputs = try resolveSamplerRandomInputs(
+                assistantRandomU: assistantRandomU,
+                audioRandomU: audioRandomU,
+                rng: &rng
+            )
             let sampled = try runFixedSampledFrame(
                 globalHidden: globalHidden,
                 repetitionSeenMask: repetitionSeenMask,
-                assistantRandomU: assistantRandomU,
-                audioRandomU: audioRandomU
+                assistantRandomU: samplerInputs.assistantRandomU,
+                audioRandomU: samplerInputs.audioRandomU
             )
             
             generatedCodes.append(sampled.frameTokenIds)
@@ -435,7 +449,8 @@ public actor MOSSTTSEngine {
         promptAudioCodes: [[Int32]],
         manifest: MOSSBrowserManifest,
         maxFrames: Int,
-        assistantRandomU: Float = 0.5,
+        seed: UInt64? = nil,
+        assistantRandomU: Float? = nil,
         audioRandomU: [Float]? = nil,
         stopOnShouldContinue: Bool = true
     ) -> AsyncThrowingStream<[Int32], Error> {
@@ -447,6 +462,7 @@ public actor MOSSTTSEngine {
                         promptAudioCodes: promptAudioCodes,
                         manifest: manifest,
                         maxFrames: maxFrames,
+                        seed: seed,
                         assistantRandomU: assistantRandomU,
                         audioRandomU: audioRandomU,
                         stopOnShouldContinue: stopOnShouldContinue
@@ -572,7 +588,7 @@ public actor MOSSTTSEngine {
     public func runFixedSampledFrame(
         globalHidden: [Float],
         repetitionSeenMask: [Int32]? = nil,
-        assistantRandomU: Float = 0.5,
+        assistantRandomU: Float? = nil,
         audioRandomU: [Float]? = nil
     ) throws -> SampledFrameResult {
         guard let session = localFixedSampledFrameSession else {
@@ -587,7 +603,8 @@ public actor MOSSTTSEngine {
             throw MOSSTTSError.invalidInput("repetitionSeenMask must have 16 * 1024 elements")
         }
         
-        let audioRandom = audioRandomU ?? [Float](repeating: 0.5, count: 16)
+        let resolvedAssistantRandom = assistantRandomU ?? Float.random(in: 0..<1)
+        let audioRandom = audioRandomU ?? (0..<16).map { _ in Float.random(in: 0..<1) }
         guard audioRandom.count == 16 else {
             throw MOSSTTSError.invalidInput("audioRandomU must contain 16 floats")
         }
@@ -596,7 +613,7 @@ public actor MOSSTTSEngine {
             inputs: [
                 "global_hidden": ONNXTensor.floats(globalHidden, shape: [1, 768]),
                 "repetition_seen_mask": ONNXTensor.int32s(mask, shape: [1, 16, 1024]),
-                "assistant_random_u": ONNXTensor.floats([assistantRandomU], shape: [1]),
+                "assistant_random_u": ONNXTensor.floats([resolvedAssistantRandom], shape: [1]),
                 "audio_random_u": ONNXTensor.floats(audioRandom, shape: [1, 16])
             ],
             outputs: session.outputNames
@@ -652,7 +669,8 @@ public actor MOSSTTSEngine {
         promptAudioCodes: [[Int32]],
         manifest: MOSSBrowserManifest,
         maxFrames: Int,
-        assistantRandomU: Float,
+        seed: UInt64?,
+        assistantRandomU: Float?,
         audioRandomU: [Float]?,
         stopOnShouldContinue: Bool,
         onFrame: @escaping @Sendable ([Int32]) -> Bool
@@ -687,13 +705,19 @@ public actor MOSSTTSEngine {
         var previousKeyValues = prefill.keyValues
         var pastValidLength = Int32(prefill.sequenceLength)
         var repetitionSeenMask = [Int32](repeating: 0, count: manifest.ttsConfig.nVq * 1024)
+        var rng = seed.map(SplitMix64.init)
         
         for _ in 0..<maxFrames {
+            let samplerInputs = try resolveSamplerRandomInputs(
+                assistantRandomU: assistantRandomU,
+                audioRandomU: audioRandomU,
+                rng: &rng
+            )
             let sampled = try runFixedSampledFrame(
                 globalHidden: globalHidden,
                 repetitionSeenMask: repetitionSeenMask,
-                assistantRandomU: assistantRandomU,
-                audioRandomU: audioRandomU
+                assistantRandomU: samplerInputs.assistantRandomU,
+                audioRandomU: samplerInputs.audioRandomU
             )
             updateRepetitionSeenMask(&repetitionSeenMask, with: sampled.frameTokenIds, nVq: manifest.ttsConfig.nVq)
             
@@ -718,6 +742,63 @@ public actor MOSSTTSEngine {
             pastValidLength = Int32(decode.totalSequenceLength)
             globalHidden = try extractLastHidden(decode.globalHidden, shape: decode.globalHiddenShape)
         }
+    }
+
+    private func resolveSamplerRandomInputs(
+        assistantRandomU: Float?,
+        audioRandomU: [Float]?,
+        rng: inout SplitMix64?
+    ) throws -> (assistantRandomU: Float, audioRandomU: [Float]) {
+        let resolvedAssistantRandom = assistantRandomU ?? nextRandomFloat(using: &rng)
+        let resolvedAudioRandom = audioRandomU ?? nextRandomFloatArray(count: 16, using: &rng)
+        guard resolvedAudioRandom.count == 16 else {
+            throw MOSSTTSError.invalidInput("audioRandomU must contain 16 floats")
+        }
+        return (resolvedAssistantRandom, resolvedAudioRandom)
+    }
+
+    private func nextRandomFloat(using rng: inout SplitMix64?) -> Float {
+        guard var localRNG = rng else {
+            return Float.random(in: 0..<1)
+        }
+        let value = localRNG.nextUnitFloat()
+        rng = localRNG
+        return value
+    }
+
+    private func nextRandomFloatArray(count: Int, using rng: inout SplitMix64?) -> [Float] {
+        guard var localRNG = rng else {
+            return (0..<count).map { _ in Float.random(in: 0..<1) }
+        }
+
+        var values: [Float] = []
+        values.reserveCapacity(count)
+        for _ in 0..<count {
+            values.append(localRNG.nextUnitFloat())
+        }
+        rng = localRNG
+        return values
+    }
+}
+
+private struct SplitMix64: Sendable {
+    private var state: UInt64
+
+    init(seed: UInt64) {
+        self.state = seed
+    }
+
+    mutating func next() -> UInt64 {
+        state &+= 0x9E3779B97F4A7C15
+        var z = state
+        z = (z ^ (z >> 30)) &* 0xBF58476D1CE4E5B9
+        z = (z ^ (z >> 27)) &* 0x94D049BB133111EB
+        return z ^ (z >> 31)
+    }
+
+    mutating func nextUnitFloat() -> Float {
+        let upper24 = next() >> 40
+        return Float(upper24) / Float(1 << 24)
     }
 }
 

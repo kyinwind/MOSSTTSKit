@@ -215,8 +215,9 @@ public actor MOSSTTSKit {
             promptAudioCodes: promptAudioCodes,
             manifest: manifest,
             maxFrames: maxFrames,
-            assistantRandomU: 0.5,
-            audioRandomU: [Float](repeating: 0.5, count: manifest.ttsConfig.nVq),
+            seed: opts.seed,
+            assistantRandomU: nil,
+            audioRandomU: nil,
             progressCallback: progressCallback
         )
         
@@ -271,8 +272,9 @@ public actor MOSSTTSKit {
             promptAudioCodes: promptAudioCodes,
             manifest: manifest,
             maxFrames: maxFrames,
-            assistantRandomU: 0.5,
-            audioRandomU: [Float](repeating: 0.5, count: manifest.ttsConfig.nVq)
+            seed: opts.seed,
+            assistantRandomU: nil,
+            audioRandomU: nil
         )
         
         return AsyncThrowingStream { continuation in

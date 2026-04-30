@@ -205,8 +205,15 @@ public final class AudioTokenizerONNX: @unchecked Sendable, MOSSAudioTokenizer {
               let outputData = outputTensor.toFloats() else {
             throw MOSSTTSError.inferenceFailed("Failed to get decoder output")
         }
-        
-        return interleaveChannelMajorAudio(Array(outputData), shape: outputTensor.shape)
+
+        let audioLengthsName = session.outputNames.dropFirst().first ?? "audio_lengths"
+        let validFrameCount = outputs[audioLengthsName]?.toInt32s()?.first.map(Int.init)
+
+        return interleaveChannelMajorAudio(
+            Array(outputData),
+            shape: outputTensor.shape,
+            validFrames: validFrameCount
+        )
     }
     
     public func decode(codes: [[Int32]], to outputPath: String) async throws {
@@ -283,18 +290,28 @@ public final class AudioTokenizerONNX: @unchecked Sendable, MOSSAudioTokenizer {
         return samples + samples
     }
     
-    private func interleaveChannelMajorAudio(_ samples: [Float], shape: [Int]) -> [Float] {
+    private func interleaveChannelMajorAudio(
+        _ samples: [Float],
+        shape: [Int],
+        validFrames: Int? = nil
+    ) -> [Float] {
         guard shape.count >= 3 else { return samples }
         let channels = shape[shape.count - 2]
         let frames = shape[shape.count - 1]
-        guard channels == 2, samples.count >= channels * frames else { return samples }
+        let trimmedFrames = max(0, min(validFrames ?? frames, frames))
+        guard channels == 2, samples.count >= channels * frames else {
+            if let validFrames = validFrames, validFrames < samples.count {
+                return Array(samples.prefix(validFrames))
+            }
+            return samples
+        }
         
         var interleaved: [Float] = []
-        interleaved.reserveCapacity(channels * frames)
+        interleaved.reserveCapacity(channels * trimmedFrames)
         let leftOffset = 0
         let rightOffset = frames
         
-        for index in 0..<frames {
+        for index in 0..<trimmedFrames {
             interleaved.append(samples[leftOffset + index])
             interleaved.append(samples[rightOffset + index])
         }
