@@ -18,6 +18,9 @@ final class MOSSInferenceRequestBuilderTests: XCTestCase {
         )
         
         XCTAssertEqual(manifest.builtinVoices.first?.voice, "demo")
+        XCTAssertEqual(manifest.builtinVoices.first?.displayName, "Demo Voice")
+        XCTAssertEqual(manifest.builtinVoices.first?.group, "Demo")
+        XCTAssertEqual(manifest.builtinVoices.first?.audioFile, "demo.wav")
         XCTAssertEqual(request.attentionMask, [[1, 1, 1, 1, 1, 1, 1, 1, 1, 1]])
         XCTAssertEqual(request.inputIds[0], [100, -1, -1, -1])
         XCTAssertEqual(request.inputIds[1], [201, -1, -1, -1])
@@ -67,6 +70,9 @@ final class MOSSInferenceRequestBuilderTests: XCTestCase {
           "builtin_voices": [
             {
               "voice": "demo",
+              "display_name": "Demo Voice",
+              "group": "Demo",
+              "audio_file": "demo.wav",
               "prompt_audio_codes": [[1, 2, 3]]
             }
           ]

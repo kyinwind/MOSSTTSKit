@@ -10,7 +10,7 @@ MOSSTTSKit 是一个基于 ONNX Runtime 的 MOSS-TTS-Nano Swift Package。
 - 从 HuggingFace 自动下载并缓存 MOSS Audio Tokenizer 模型
 - 支持“自动下载后初始化”或“指定本地模型目录初始化”
 - 加载文本 tokenizer 与音频 tokenizer
-- 提供内置音色，以及 `makeSpeaker(name:referenceAudioURL:)` 语音克隆入口
+- 通过包 API 提供模型内全部内置音色，并提供 `makeSpeaker(name:referenceAudioURL:)` 语音克隆入口
 - 提供基于 ONNX Runtime 的通用 `ONNXSession` 推理封装
 - 提供真实模型驱动的多帧 TTS 生成路径
 
@@ -168,11 +168,15 @@ for try await chunk in stream {
 }
 ```
 
-7. 获取内置音色：
+7. 获取全部内置音色：
 
 ```swift
 let speakers = await tts.availableSpeakers
-print(speakers.map(\.name))
+for speaker in speakers {
+    print(speaker.identifier ?? speaker.name)
+    print(speaker.displayName ?? speaker.name)
+    print(speaker.group ?? "Unknown Group")
+}
 ```
 
 8. 用参考音频创建克隆音色：

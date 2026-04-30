@@ -368,19 +368,17 @@ public actor MOSSTTSKit {
     
     /// 包内置可选音色。
     ///
-    /// MOSS-TTS-Nano 的主要能力是 zero-shot voice cloning；预设音色目前只提供默认占位，
-    /// 调用方可以通过 `makeSpeaker(name:referenceAudioURL:)` 基于本地参考音频创建克隆音色。
+    /// 这里返回模型 manifest 中声明的全部内置音色，调用方不需要自己读取 manifest 文件。
+    /// 若模型目录缺少 `browser_poc_manifest.json`，则返回空数组。
     public var availableSpeakers: [MOSSSpeaker] {
-        if let builtinVoices = browserManifest?.builtinVoices, !builtinVoices.isEmpty {
-            return builtinVoices.map { voice in
-                MOSSSpeaker(
-                    name: voice.voice,
-                    referenceAudioCodes: voice.promptAudioCodes
-                )
-            }
-        }
-        
-        return MOSSSpeaker.presets
+        builtinSpeakers
+    }
+    
+    /// 模型内置音色的稳定 API。
+    ///
+    /// 与 `availableSpeakers` 相同，保留这个命名是为了让调用方更直观地表达“只要模型内置音色”。
+    public var builtinSpeakers: [MOSSSpeaker] {
+        browserManifest?.builtinVoices.map(Self.makeBuiltinSpeaker(from:)) ?? []
     }
     
     /// 用本地参考音频创建可传入 `speak` 的克隆音色。
@@ -412,6 +410,17 @@ public actor MOSSTTSKit {
         
         // 返回默认 speaker (zero vector)
         return [Float](repeating: 0, count: 192)
+    }
+    
+    private static func makeBuiltinSpeaker(from voice: MOSSBrowserManifest.BuiltinVoice) -> MOSSSpeaker {
+        MOSSSpeaker(
+            identifier: voice.voice,
+            name: voice.voice,
+            displayName: voice.displayName,
+            group: voice.group,
+            audioFileName: voice.audioFile,
+            referenceAudioCodes: voice.promptAudioCodes
+        )
     }
     
     // MARK: - Model Management

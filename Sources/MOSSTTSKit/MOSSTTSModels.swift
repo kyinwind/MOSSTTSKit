@@ -64,8 +64,20 @@ public enum MOSSModelVariant: String, CaseIterable, Sendable {
 
 /// 说话人配置（用于语音克隆）
 public struct MOSSSpeaker: Sendable, Codable {
+    /// 稳定标识符。内置音色通常对应 manifest 里的 `voice` 字段。
+    public let identifier: String?
+    
     /// 说话人名称
     public let name: String
+    
+    /// 更友好的展示名称。内置音色通常对应 manifest 里的 `display_name`。
+    public let displayName: String?
+    
+    /// 音色分组，例如 "Chinese Male"。
+    public let group: String?
+    
+    /// 参考音频文件名（如果来自内置音色 manifest）。
+    public let audioFileName: String?
     
     /// 参考音频路径（本地文件 URL 或 HuggingFace 路径）
     public let referenceAudioPath: String?
@@ -86,13 +98,21 @@ public struct MOSSSpeaker: Sendable, Codable {
     public let referenceAudioCodes: [[Int32]]?
     
     public init(
+        identifier: String? = nil,
         name: String,
+        displayName: String? = nil,
+        group: String? = nil,
+        audioFileName: String? = nil,
         referenceAudioPath: String? = nil,
         referenceAudioData: Data? = nil,
         embedding: [Float]? = nil,
         referenceAudioCodes: [[Int32]]? = nil
     ) {
+        self.identifier = identifier
         self.name = name
+        self.displayName = displayName
+        self.group = group
+        self.audioFileName = audioFileName
         self.referenceAudioPath = referenceAudioPath
         self.referenceAudioData = referenceAudioData
         self.embedding = embedding

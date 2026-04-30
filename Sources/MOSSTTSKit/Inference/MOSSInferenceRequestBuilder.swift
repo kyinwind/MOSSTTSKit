@@ -67,16 +67,25 @@ public struct MOSSBrowserManifest: Sendable, Decodable {
     
     public struct BuiltinVoice: Sendable, Decodable {
         public let voice: String
+        public let displayName: String?
+        public let group: String?
+        public let audioFile: String?
         public let promptAudioCodes: [[Int32]]
         
         public init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             self.voice = try container.decode(String.self, forKey: .voice)
+            self.displayName = try container.decodeIfPresent(String.self, forKey: .displayName)
+            self.group = try container.decodeIfPresent(String.self, forKey: .group)
+            self.audioFile = try container.decodeIfPresent(String.self, forKey: .audioFile)
             self.promptAudioCodes = try container.decodeIfPresent([[Int32]].self, forKey: .promptAudioCodes) ?? []
         }
         
         private enum CodingKeys: String, CodingKey {
             case voice
+            case displayName
+            case group
+            case audioFile
             case promptAudioCodes
         }
     }

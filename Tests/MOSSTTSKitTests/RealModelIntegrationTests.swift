@@ -292,6 +292,30 @@ final class RealModelIntegrationTests: XCTestCase {
         XCTAssertGreaterThan(result.duration, 0)
     }
     
+    func testAvailableSpeakersExposesBuiltinVoicesWhenModelsAreAvailable() async throws {
+        let downloader = ModelDownloader()
+        let ttsDir = await downloader.ttsModelDir(for: .mossTTSNano100M)
+        let audioTokenizerDir = await downloader.tokenizerModelDir(for: .mossTTSNano100M)
+        let paths = ModelPaths(ttsModelDir: ttsDir, audioTokenizerDir: audioTokenizerDir)
+        
+        guard paths.availability().isComplete else {
+            throw XCTSkip("MOSS-TTS model files are not available in the default cache")
+        }
+        
+        let tts = try await MOSSTTSKit(
+            ttsModelDir: ttsDir,
+            audioTokenizerDir: audioTokenizerDir,
+            options: MOSSTTSOptions(maxLength: 3)
+        )
+        let availableSpeakers = await tts.availableSpeakers
+        let builtinSpeakers = await tts.builtinSpeakers
+        
+        XCTAssertEqual(availableSpeakers.count, 18)
+        XCTAssertEqual(builtinSpeakers.count, 18)
+        XCTAssertEqual(availableSpeakers.first?.identifier, "Junhao")
+        XCTAssertEqual(availableSpeakers.first?.displayName, "CN 欢迎关注模思智能")
+    }
+    
     func testSpeakProgressCallbackCanCancelWhenModelsAreAvailable() async throws {
         let downloader = ModelDownloader()
         let ttsDir = await downloader.ttsModelDir(for: .mossTTSNano100M)

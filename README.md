@@ -10,7 +10,7 @@ Current package scope:
 - Download and cache the MOSS Audio Tokenizer ONNX model files from HuggingFace.
 - Initialize from either cached/downloaded models or explicit local model directories.
 - Load text tokenizer and audio tokenizer models.
-- Expose speaker presets and a `makeSpeaker(name:referenceAudioURL:)` API that encodes reference audio into acoustic codes for voice cloning.
+- Expose all built-in voices from the model manifest through package APIs, plus a `makeSpeaker(name:referenceAudioURL:)` API that encodes reference audio into acoustic codes for voice cloning.
 - Provide a real ONNX Runtime backed `ONNXSession` wrapper for generic tensor inference.
 - Run a verified real-model preview path: prefill, global decode step, fixed frame sampler, and audio tokenizer decode for the first generated acoustic frame.
 
@@ -167,11 +167,15 @@ for try await chunk in stream {
 }
 ```
 
-7. Enumerate built-in voices:
+7. Enumerate all built-in voices:
 
 ```swift
 let speakers = await tts.availableSpeakers
-print(speakers.map(\.name))
+for speaker in speakers {
+    print(speaker.identifier ?? speaker.name)
+    print(speaker.displayName ?? speaker.name)
+    print(speaker.group ?? "Unknown Group")
+}
 ```
 
 8. Build a cloned speaker from a reference WAV:

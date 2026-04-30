@@ -18,20 +18,3 @@ extension MOSSSpeaker {
         embedding != nil
     }
 }
-
-// MARK: - Preset Speakers
-
-extension MOSSSpeaker {
-    
-    /// 预设音色集合
-    public static let presets: [MOSSSpeaker] = [
-        MOSSSpeaker(name: "默认中文"),
-        MOSSSpeaker(name: "默认英文"),
-    ]
-    
-    /// 默认中文音色
-    public static let defaultChinese = presets[0]
-    
-    /// 默认英文音色
-    public static let defaultEnglish = presets[1]
-}

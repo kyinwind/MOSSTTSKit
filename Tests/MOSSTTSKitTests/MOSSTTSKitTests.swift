@@ -101,6 +101,10 @@ final class MOSSTTSKitTests: XCTestCase {
         )
         
         XCTAssertEqual(speaker.name, "Test Speaker")
+        XCTAssertNil(speaker.identifier)
+        XCTAssertNil(speaker.displayName)
+        XCTAssertNil(speaker.group)
+        XCTAssertNil(speaker.audioFileName)
         XCTAssertEqual(speaker.referenceAudioPath, "/path/to/audio.wav")
         XCTAssertNil(speaker.referenceAudioData)
         XCTAssertNil(speaker.embedding)
@@ -120,6 +124,23 @@ final class MOSSTTSKitTests: XCTestCase {
         XCTAssertTrue(speaker.hasEmbedding)
         XCTAssertEqual(speaker.getEmbedding(), embedding)
         XCTAssertEqual(speaker.referenceAudioCodes, codes)
+    }
+    
+    func testSpeakerStoresBuiltinMetadata() throws {
+        let speaker = MOSSSpeaker(
+            identifier: "Junhao",
+            name: "Junhao",
+            displayName: "CN 欢迎关注模思智能",
+            group: "Chinese Male",
+            audioFileName: "zh_1.wav",
+            referenceAudioCodes: [[1, 2, 3]]
+        )
+        
+        XCTAssertEqual(speaker.identifier, "Junhao")
+        XCTAssertEqual(speaker.name, "Junhao")
+        XCTAssertEqual(speaker.displayName, "CN 欢迎关注模思智能")
+        XCTAssertEqual(speaker.group, "Chinese Male")
+        XCTAssertEqual(speaker.audioFileName, "zh_1.wav")
     }
     
     // MARK: - Speech Result Tests
