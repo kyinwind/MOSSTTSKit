@@ -31,7 +31,7 @@ struct MOSSRegressionSamplesCLI {
         let tts = try await MOSSTTSKit(
             ttsModelDir: ttsDir,
             audioTokenizerDir: audioTokenizerDir,
-            options: MOSSTTSOptions(maxGeneratedFrames: 128, seed: 1234)
+            options: MOSSTTSOptions()
         )
 
         let speakers = await tts.availableSpeakers

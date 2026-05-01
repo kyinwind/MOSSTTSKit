@@ -22,8 +22,9 @@ public struct MOSSTTSOptions: Sendable, Equatable {
     
     /// 最大生成音频帧数。
     ///
-    /// MOSS Audio Tokenizer 每帧约 80ms (48kHz / 3840 samples)。默认使用较保守的
-    /// 32 帧，便于客户端早期接入测试；调用方可按需要调高。
+    /// MOSS Audio Tokenizer 每帧约 80ms (48kHz / 3840 samples)。
+    /// 当值为 `nil` 时，MOSSTTSKit 会回退到模型 manifest 里的默认上限，
+    /// 这样普通 `speak(...)` 调用在长文本场景下不会被过早截断。
     public var maxGeneratedFrames: Int?
 
     /// 长文本自动切分的最大 token 数。
@@ -120,7 +121,7 @@ public struct MOSSTTSOptions: Sendable, Equatable {
         temperature: Float = 0.6,
         topK: Int = 50,
         maxLength: Int = 10000,
-        maxGeneratedFrames: Int? = 32,
+        maxGeneratedFrames: Int? = nil,
         maxTextTokensPerChunk: Int = 75,
         seed: UInt64? = 1234,
         batchSize: Int = 1,

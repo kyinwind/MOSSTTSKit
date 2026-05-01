@@ -15,21 +15,16 @@ struct MOSSTTSSampleCLI {
         let tts = try await MOSSTTSKit(
             ttsModelDir: ttsDir,
             audioTokenizerDir: audioTokenizerDir,
-            options: MOSSTTSOptions(maxGeneratedFrames: 64)
+            options: MOSSTTSOptions()
         )
 
         let speakers = await tts.availableSpeakers
         let speaker = speakers.first
 
         let outputURL = URL(fileURLWithPath: outputPath)
-        let result = try await tts.speak(text: text, speaker: speaker)
         try await tts.speakToFile(text: text, outputURL: outputURL, speaker: speaker)
 
         print("wrote \(outputURL.path)")
-        print("sampleRate=\(result.sampleRate)")
-        print("channels=\(result.channels)")
-        print("duration=\(result.duration)")
-        print("samples=\(result.audioSamples.count)")
         print("speaker=\(speaker?.displayName ?? speaker?.name ?? "none")")
     }
 }

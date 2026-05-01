@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [0.1.6]
+## [0.1.7]
 
 ### Added
 
@@ -19,9 +19,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Chinese punctuation tokenization issues that could introduce incorrect spoken syllables
 - Audio tokenizer decode trimming using `audio_lengths`
 - Long regression sample truncation caused by an overly small frame cap
+- Long-text chunk truncation caused by an overly aggressive default `maxGeneratedFrames` limit at the package and app call-site layers
 
 ### Improved
 
 - Long-text synthesis usability for app integrations such as TTSMate
+- Default `MOSSTTSOptions()` behavior now falls back to the model manifest frame limit when `maxGeneratedFrames` is unset
+- Sample and integration guidance now distinguishes short preview frame caps from full-text synthesis defaults
 - Tokenizer regression coverage for Chinese punctuation, dates, numbers, mixed Chinese/English text, and multi-sentence inputs
 - Repository documentation for model download, source attribution, license details, and long-text support

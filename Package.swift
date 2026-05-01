@@ -33,21 +33,6 @@ let package = Package(
                 .process("Resources")
             ]
         ),
-        .executableTarget(
-            name: "MOSSTTSSampleCLI",
-            dependencies: ["MOSSTTSKit"],
-            path: "Examples/MOSSTTSSampleCLI"
-        ),
-        .executableTarget(
-            name: "MOSSFrameDumpCLI",
-            dependencies: ["MOSSTTSKit"],
-            path: "Examples/MOSSFrameDumpCLI"
-        ),
-        .executableTarget(
-            name: "MOSSRegressionSamplesCLI",
-            dependencies: ["MOSSTTSKit"],
-            path: "Examples/MOSSRegressionSamplesCLI"
-        ),
         .testTarget(
             name: "MOSSTTSKitTests",
             dependencies: ["MOSSTTSKit"]

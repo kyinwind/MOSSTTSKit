@@ -60,6 +60,13 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(options.maxGeneratedFrames, 12)
         XCTAssertTrue(options.validate().isEmpty)
     }
+
+    func testOptionsDefaultUsesManifestFrameLimitWhenUnset() throws {
+        let options = MOSSTTSOptions()
+
+        XCTAssertNil(options.maxGeneratedFrames)
+        XCTAssertTrue(options.validate().isEmpty)
+    }
     
     func testOptionsRejectInvalidMaxGeneratedFrames() throws {
         let options = MOSSTTSOptions(maxGeneratedFrames: 0)

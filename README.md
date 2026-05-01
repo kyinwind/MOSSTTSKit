@@ -78,6 +78,12 @@ let result = try await tts.speak(
 
 For longer paragraphs, you usually do not need to split text manually in the caller anymore.
 
+Important:
+
+- Do not set a small `maxGeneratedFrames` value for long-form synthesis unless you intentionally want a short preview.
+- If `maxGeneratedFrames` is left as `nil`, MOSSTTSKit will fall back to the model manifest default, which is the recommended behavior for normal sentence and paragraph synthesis.
+- Small frame caps such as `8`, `16`, `32`, or `64` are best reserved for smoke tests, progress UI testing, and short preview generation.
+
 ## Automatic Model Download
 
 `MOSSTTSKit()` enables automatic model download by default.
@@ -163,7 +169,7 @@ import MOSSTTSKit
 let tts = try await MOSSTTSKit(
     options: .init(
         autoDownload: true,
-        synthesisOptions: MOSSTTSOptions(maxGeneratedFrames: 8),
+        synthesisOptions: MOSSTTSOptions(),
         progressCallback: { progress in
             print(progress.description)
         }
@@ -179,7 +185,7 @@ import MOSSTTSKit
 let tts = try await MOSSTTSKit(
     ttsModelDir: URL(fileURLWithPath: "/Users/yangxuehui/Library/Caches/MOSSTTSKit/Models/MOSS-TTS-Nano-100M-ONNX"),
     audioTokenizerDir: URL(fileURLWithPath: "/Users/yangxuehui/Library/Caches/MOSSTTSKit/Models/MOSS-Audio-Tokenizer-Nano-ONNX"),
-    options: MOSSTTSOptions(maxGeneratedFrames: 8)
+    options: MOSSTTSOptions()
 )
 ```
 
@@ -246,7 +252,8 @@ let cloned = try await tts.speak(
 
 Integration notes:
 
-- Start with `maxGeneratedFrames: 3` or `8` for the first UI test.
+- Start with `maxGeneratedFrames: 3` or `8` only for the first UI smoke test or a deliberate short preview.
+- For normal sentence and paragraph synthesis, prefer `MOSSTTSOptions()` and let the package use the model manifest frame limit by default.
 - For longer paragraphs, the package now chunks text automatically. You can usually keep the full text in one `speak(...)` call and tune `maxTextTokensPerChunk` only when you need finer control.
 - Default auto-download cache on macOS is `~/Library/Caches/MOSSTTSKit/Models`.
 - `speakStream(...)` is the best fit if TTSMate wants progressive playback.
@@ -264,6 +271,15 @@ let preview = try await tts.speak(
     print("Generated frame \(progress.currentStep)/\(progress.totalSteps)")
     return true
 }
+```
+
+Recommended default for full text synthesis:
+
+```swift
+let result = try await tts.speak(
+    text: "这里可以放完整段落，不需要手动切分，也不需要额外设置低帧数上限。",
+    options: MOSSTTSOptions()
+)
 ```
 
 Streaming audio chunks:

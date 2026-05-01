@@ -79,6 +79,12 @@ let result = try await tts.speak(
 
 对于较长段落，调用方通常不需要再自己手动切分文本。
 
+重要说明：
+
+- 对于正式的长文本合成，不建议再手动设置较小的 `maxGeneratedFrames`，除非你本来就只想做短预览。
+- 当 `maxGeneratedFrames` 保持为 `nil` 时，MOSSTTSKit 会回退到模型 manifest 里的默认上限，这是普通句子和段落合成时更推荐的行为。
+- 像 `8`、`16`、`32`、`64` 这样的较小帧上限，更适合 smoke test、进度 UI 联调和短句试听。
+
 ## 自动下载模型
 
 `MOSSTTSKit()` 默认会自动下载模型。
@@ -164,7 +170,7 @@ import MOSSTTSKit
 let tts = try await MOSSTTSKit(
     options: .init(
         autoDownload: true,
-        synthesisOptions: MOSSTTSOptions(maxGeneratedFrames: 8),
+        synthesisOptions: MOSSTTSOptions(),
         progressCallback: { progress in
             print(progress.description)
         }
@@ -180,7 +186,7 @@ import MOSSTTSKit
 let tts = try await MOSSTTSKit(
     ttsModelDir: URL(fileURLWithPath: "/Users/yangxuehui/Library/Caches/MOSSTTSKit/Models/MOSS-TTS-Nano-100M-ONNX"),
     audioTokenizerDir: URL(fileURLWithPath: "/Users/yangxuehui/Library/Caches/MOSSTTSKit/Models/MOSS-Audio-Tokenizer-Nano-ONNX"),
-    options: MOSSTTSOptions(maxGeneratedFrames: 8)
+    options: MOSSTTSOptions()
 )
 ```
 
@@ -247,7 +253,8 @@ let cloned = try await tts.speak(
 
 接入建议：
 
-- 第一轮 UI 测试建议先用 `maxGeneratedFrames: 3` 或 `8`
+- 第一轮 UI smoke test 或短预览，建议先用 `maxGeneratedFrames: 3` 或 `8`
+- 对于正常句子和较长段落，优先使用 `MOSSTTSOptions()`，让包默认使用模型 manifest 的帧上限
 - 对于较长段落，现在可以直接把完整文本交给一次 `speak(...)` 调用；只有在你想细调切分粒度时，才需要调整 `maxTextTokensPerChunk`
 - 如果要边生成边播放，优先接 `speakStream(...)`
 - 如果只想先确认链路能跑通，优先接 `speak(...)`
@@ -266,6 +273,15 @@ let preview = try await tts.speak(
     print("Generated frame \(progress.currentStep)/\(progress.totalSteps)")
     return true
 }
+```
+
+完整文本合成的推荐写法：
+
+```swift
+let result = try await tts.speak(
+    text: "这里可以直接放完整段落，不需要手动切分，也不需要额外设置较小的帧数上限。",
+    options: MOSSTTSOptions()
+)
 ```
 
 流式输出音频 chunk：
