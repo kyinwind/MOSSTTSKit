@@ -248,11 +248,40 @@ public struct MOSSProgress: Sendable {
         guard totalSteps > 0 else { return 0 }
         return Double(currentStep) / Double(totalSteps)
     }
-    
-    public init(audioSamples: [Float], currentStep: Int, totalSteps: Int) {
+
+    /// 当前正在处理的文本 chunk 序号（从 1 开始）
+    public let currentChunkIndex: Int?
+
+    /// 总 chunk 数
+    public let totalChunks: Int?
+
+    /// 当前 chunk 文本
+    public let currentChunkText: String?
+
+    /// 当前已经累计生成的音频样本数
+    public let generatedSampleCount: Int?
+
+    /// 这次进度是否恰好处于 chunk 边界
+    public let isChunkBoundary: Bool
+
+    public init(
+        audioSamples: [Float],
+        currentStep: Int,
+        totalSteps: Int,
+        currentChunkIndex: Int? = nil,
+        totalChunks: Int? = nil,
+        currentChunkText: String? = nil,
+        generatedSampleCount: Int? = nil,
+        isChunkBoundary: Bool = false
+    ) {
         self.audioSamples = audioSamples
         self.currentStep = currentStep
         self.totalSteps = totalSteps
+        self.currentChunkIndex = currentChunkIndex
+        self.totalChunks = totalChunks
+        self.currentChunkText = currentChunkText
+        self.generatedSampleCount = generatedSampleCount
+        self.isChunkBoundary = isChunkBoundary
     }
 }
 
@@ -477,41 +506,54 @@ public final class ONNXSession: @unchecked Sendable {
         guard isLoaded else {
             throw MOSSTTSError.inferenceFailed("Session not loaded")
         }
-        
-        var ortInputs: [String: ORTValue] = [:]
-        for (name, tensor) in inputs {
-            let tensorData = NSMutableData(data: tensor.data)
-            let shape = tensor.shape.map { NSNumber(value: $0) }
-            let value = try ORTValue(
-                tensorData: tensorData,
-                elementType: try tensor.dataType.ortElementType(),
-                shape: shape
-            )
-            ortInputs[name] = value
-        }
-        
-        let requestedOutputs = outputs.isEmpty ? Set(outputNames) : Set(outputs)
-        let ortOutputs = try session.run(
-            withInputs: ortInputs,
-            outputNames: requestedOutputs,
-            runOptions: nil
-        )
-        
-        var result: [String: ONNXTensor] = [:]
-        for (name, value) in ortOutputs {
-            let typeInfo = try value.typeInfo()
-            guard let tensorInfo = typeInfo.tensorTypeAndShapeInfo else {
-                throw MOSSTTSError.inferenceFailed("Output is not a tensor: \(name)")
+
+        return try autoreleasepool {
+            var ortInputs: [String: ORTValue] = [:]
+            ortInputs.reserveCapacity(inputs.count)
+            for (name, tensor) in inputs {
+                let tensorData = tensor.data.withUnsafeBytes { rawBuffer -> NSMutableData in
+                    guard let baseAddress = rawBuffer.baseAddress else {
+                        return NSMutableData()
+                    }
+                    return NSMutableData(
+                        bytesNoCopy: UnsafeMutableRawPointer(mutating: baseAddress),
+                        length: rawBuffer.count,
+                        freeWhenDone: false
+                    )
+                }
+                let shape = tensor.shape.map { NSNumber(value: $0) }
+                let value = try ORTValue(
+                    tensorData: tensorData,
+                    elementType: try tensor.dataType.ortElementType(),
+                    shape: shape
+                )
+                ortInputs[name] = value
             }
-            
-            let tensorData = try value.tensorData()
-            let data = Data(referencing: tensorData)
-            let shape = tensorInfo.shape.map { $0.intValue }
-            let dataType = try ONNXTensorDataType(ortElementType: tensorInfo.elementType)
-            result[name] = ONNXTensor(shape: shape, dataType: dataType, data: data)
+
+            let requestedOutputs = outputs.isEmpty ? Set(outputNames) : Set(outputs)
+            let ortOutputs = try session.run(
+                withInputs: ortInputs,
+                outputNames: requestedOutputs,
+                runOptions: nil
+            )
+
+            var result: [String: ONNXTensor] = [:]
+            result.reserveCapacity(ortOutputs.count)
+            for (name, value) in ortOutputs {
+                let typeInfo = try value.typeInfo()
+                guard let tensorInfo = typeInfo.tensorTypeAndShapeInfo else {
+                    throw MOSSTTSError.inferenceFailed("Output is not a tensor: \(name)")
+                }
+
+                let tensorData = try value.tensorData()
+                let data = Data(referencing: tensorData)
+                let shape = tensorInfo.shape.map { $0.intValue }
+                let dataType = try ONNXTensorDataType(ortElementType: tensorInfo.elementType)
+                result[name] = ONNXTensor(shape: shape, dataType: dataType, data: data)
+            }
+
+            return result
         }
-        
-        return result
     }
     
     /// 卸载会话

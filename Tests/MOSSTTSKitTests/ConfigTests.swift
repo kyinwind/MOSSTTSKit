@@ -73,6 +73,24 @@ final class ConfigTests: XCTestCase {
         
         XCTAssertEqual(options.validate().count, 1)
     }
+
+    func testSamplerRandomSourceMatchesNumPyPCG64ForDefaultSeed() throws {
+        let source = MOSSSamplerRandomSource(seed: 1234)
+        let expected: [Float] = [
+            0.97669977,
+            0.38019574,
+            0.9232462,
+            0.26169243,
+            0.31909707,
+            0.11809123,
+            0.24176629,
+            0.31853393,
+        ]
+
+        for value in expected {
+            XCTAssertEqual(source.nextFloat(), value, accuracy: 1e-7)
+        }
+    }
     
     // MARK: - MOSSModelVariant Tests
     

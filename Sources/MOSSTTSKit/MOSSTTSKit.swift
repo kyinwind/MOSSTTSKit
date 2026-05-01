@@ -197,6 +197,7 @@ public actor MOSSTTSKit {
         let sampleRate = audioTokenizer.sampleRate
         let outputChannels = opts.channels
         let maxFrames = resolvedMaxFrames(options: opts, manifest: manifest)
+        let randomSource = MOSSSamplerRandomSource(seed: opts.seed)
 
         var allSamples: [Float] = []
         var completedFrameSteps = 0
@@ -204,20 +205,27 @@ public actor MOSSTTSKit {
 
         for (index, chunkText) in textChunks.enumerated() {
             let completedFrameStepsSnapshot = completedFrameSteps
-            let audioSamplesSnapshot = allSamples
+            let chunkIndex = index + 1
+            let generatedSampleCountSnapshot = allSamples.count
             let chunkResult = try await synthesizeSingleChunk(
                 originalText: text,
                 processedText: chunkText,
                 promptAudioCodes: promptAudioCodes,
                 manifest: manifest,
-                options: opts
+                options: opts,
+                randomSource: randomSource
             ) { progress in
                 guard let progressCallback else { return true }
                 return progressCallback(
                     MOSSProgress(
-                        audioSamples: audioSamplesSnapshot,
+                        audioSamples: [],
                         currentStep: completedFrameStepsSnapshot + progress.currentStep,
-                        totalSteps: estimatedTotalSteps
+                        totalSteps: estimatedTotalSteps,
+                        currentChunkIndex: chunkIndex,
+                        totalChunks: textChunks.count,
+                        currentChunkText: chunkText,
+                        generatedSampleCount: generatedSampleCountSnapshot,
+                        isChunkBoundary: false
                     )
                 )
             }
@@ -231,6 +239,21 @@ public actor MOSSTTSKit {
                     sampleRate: sampleRate,
                     channels: outputChannels
                 ))
+            }
+
+            if let progressCallback {
+                _ = progressCallback(
+                    MOSSProgress(
+                        audioSamples: [],
+                        currentStep: min(completedFrameSteps, estimatedTotalSteps),
+                        totalSteps: estimatedTotalSteps,
+                        currentChunkIndex: chunkIndex,
+                        totalChunks: textChunks.count,
+                        currentChunkText: chunkText,
+                        generatedSampleCount: allSamples.count,
+                        isChunkBoundary: true
+                    )
+                )
             }
         }
 
@@ -266,6 +289,7 @@ public actor MOSSTTSKit {
         let sampleRate = audioTokenizer.sampleRate
         let channels = opts.channels
         let estimatedTotalSteps = maxFrames * max(1, textChunks.count)
+        let randomSource = MOSSSamplerRandomSource(seed: opts.seed)
         
         return AsyncThrowingStream { continuation in
             let task = Task {
@@ -281,6 +305,7 @@ public actor MOSSTTSKit {
                             manifest: manifest,
                             maxFrames: maxFrames,
                             seed: opts.seed,
+                            randomSource: randomSource,
                             assistantRandomU: nil,
                             audioRandomU: nil
                         )
@@ -486,11 +511,41 @@ public actor MOSSTTSKit {
     /// 简单文本预处理
     private func preprocessText(_ text: String) -> String {
         var processed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        processed = processed.replacingOccurrences(of: "\n", with: " ")
+        processed = normalizeLineBreakBoundaries(in: processed)
         while processed.contains("  ") {
             processed = processed.replacingOccurrences(of: "  ", with: " ")
         }
         return processed
+    }
+
+    private func normalizeLineBreakBoundaries(in text: String) -> String {
+        let normalizedNewlines = text
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+
+        let parts = normalizedNewlines
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        guard !parts.isEmpty else { return "" }
+
+        var result = ""
+        result.reserveCapacity(normalizedNewlines.count + parts.count * 2)
+
+        for (index, part) in parts.enumerated() {
+            if index > 0 {
+                let separator = containsCJK(part) || containsCJK(result) ? "。 " : ". "
+                if let last = result.last, !Self.sentenceEndPunctuation.contains(last) {
+                    result.append(contentsOf: separator)
+                } else {
+                    result.append(" ")
+                }
+            }
+            result.append(contentsOf: part)
+        }
+
+        return result
     }
 
     private func synthesizeSingleChunk(
@@ -499,26 +554,51 @@ public actor MOSSTTSKit {
         promptAudioCodes: [[Int32]],
         manifest: MOSSBrowserManifest,
         options: MOSSTTSOptions,
+        randomSource: MOSSSamplerRandomSource,
         progressCallback: MOSSProgressCallback = nil
     ) async throws -> TTSResult {
         let textEncoding = try await textTokenizer.encode(processedText)
         let textTokens = textEncoding.ids.map { Int32($0) }
         let maxFrames = resolvedMaxFrames(options: options, manifest: manifest)
-        let generationResult = try await engine.generateAudioCodes(
+        let sampleRate = audioTokenizer.sampleRate
+        let channels = options.channels
+
+        var allSamples: [Float] = []
+        var generatedCodes: [[Int32]] = []
+        var currentStep = 0
+
+        let codeStream = await engine.streamAudioCodes(
             textTokenIds: textTokens,
             promptAudioCodes: promptAudioCodes,
             manifest: manifest,
             maxFrames: maxFrames,
             seed: options.seed,
+            randomSource: randomSource,
             assistantRandomU: nil,
-            audioRandomU: nil,
-            progressCallback: progressCallback
+            audioRandomU: nil
         )
 
-        let decodedSamples = try await audioTokenizer.decode(codes: generationResult.audioCodes)
-        let allSamples = adaptChannels(decodedSamples, from: audioTokenizer.numChannels, to: options.channels)
-        let sampleRate = audioTokenizer.sampleRate
-        let channels = options.channels
+        for try await frameCodes in codeStream {
+            generatedCodes.append(frameCodes)
+            currentStep += 1
+
+            if let progressCallback {
+                let progress = MOSSProgress(
+                    audioSamples: [],
+                    currentStep: currentStep,
+                    totalSteps: maxFrames
+                )
+                guard progressCallback(progress) else {
+                    break
+                }
+            }
+        }
+
+        if !generatedCodes.isEmpty {
+            let decodedSamples = try await audioTokenizer.decode(codes: generatedCodes)
+            let adaptedSamples = adaptChannels(decodedSamples, from: audioTokenizer.numChannels, to: channels)
+            allSamples.append(contentsOf: adaptedSamples)
+        }
 
         return TTSResult(
             audioSamples: allSamples,
@@ -860,15 +940,18 @@ public actor MOSSTTSKit {
             ptr.storeBytes(of: UInt32(dataSize).littleEndian, toByteOffset: 40, as: UInt32.self)
         }
         
-        // Convert float samples to Int16
-        var audioData = Data()
+        var pcmSamples: [Int16] = []
+        pcmSamples.reserveCapacity(result.audioSamples.count)
         for sample in result.audioSamples {
             let clamped = max(-1.0, min(1.0, sample))
-            let int16 = Int16(clamped * 32767.0)
-            audioData.append(contentsOf: withUnsafeBytes(of: int16.littleEndian) { Array($0) })
+            pcmSamples.append(Int16(clamped * 32767.0))
         }
-        
-        let fileData = header + audioData
+
+        var fileData = Data(capacity: 44 + dataSize)
+        fileData.append(header)
+        pcmSamples.withUnsafeBytes { rawBuffer in
+            fileData.append(rawBuffer.bindMemory(to: UInt8.self))
+        }
         try fileData.write(to: url)
     }
 }
