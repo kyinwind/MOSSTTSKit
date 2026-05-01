@@ -14,12 +14,16 @@ import AVFoundation
 public final class AudioTokenizerONNX: @unchecked Sendable, MOSSAudioTokenizer {
     private var encodeSession: ONNXSession?
     private var decodeSession: ONNXSession?
+    private var decodeStepSession: ONNXSession?
     
     /// 编码器模型路径
     public let encodeModelPath: String
     
     /// 解码器模型路径
     public let decodeModelPath: String
+
+    /// 流式解码器模型路径
+    public let decodeStepModelPath: String?
     
     /// 配置
     public let config: AudioTokenizerConfig
@@ -38,10 +42,12 @@ public final class AudioTokenizerONNX: @unchecked Sendable, MOSSAudioTokenizer {
     public init(
         encodeModelPath: String,
         decodeModelPath: String,
+        decodeStepModelPath: String? = nil,
         config: AudioTokenizerConfig = AudioTokenizerConfig()
     ) {
         self.encodeModelPath = encodeModelPath
         self.decodeModelPath = decodeModelPath
+        self.decodeStepModelPath = decodeStepModelPath
         self.config = config
     }
     
@@ -53,6 +59,7 @@ public final class AudioTokenizerONNX: @unchecked Sendable, MOSSAudioTokenizer {
     ) async throws -> AudioTokenizerONNX {
         let encodePath = (modelDir as NSString).appendingPathComponent("moss_audio_tokenizer_encode.onnx")
         let decodePath = (modelDir as NSString).appendingPathComponent("moss_audio_tokenizer_decode_full.onnx")
+        let decodeStepPath = (modelDir as NSString).appendingPathComponent("moss_audio_tokenizer_decode_step.onnx")
         
         guard FileManager.default.fileExists(atPath: encodePath) else {
             throw MOSSTTSError.modelNotFound("Encode model not found: \(encodePath)")
@@ -64,7 +71,8 @@ public final class AudioTokenizerONNX: @unchecked Sendable, MOSSAudioTokenizer {
         
         let tokenizer = AudioTokenizerONNX(
             encodeModelPath: encodePath,
-            decodeModelPath: decodePath
+            decodeModelPath: decodePath,
+            decodeStepModelPath: FileManager.default.fileExists(atPath: decodeStepPath) ? decodeStepPath : nil
         )
         
         try await tokenizer.load()
@@ -75,6 +83,9 @@ public final class AudioTokenizerONNX: @unchecked Sendable, MOSSAudioTokenizer {
     public func load() async throws {
         encodeSession = try ONNXSession(modelPath: encodeModelPath)
         decodeSession = try ONNXSession(modelPath: decodeModelPath)
+        if let decodeStepModelPath, FileManager.default.fileExists(atPath: decodeStepModelPath) {
+            decodeStepSession = try ONNXSession(modelPath: decodeStepModelPath)
+        }
     }
     
     public func encode(audioPath: String) async throws -> AudioEncodingResult {
@@ -209,7 +220,7 @@ public final class AudioTokenizerONNX: @unchecked Sendable, MOSSAudioTokenizer {
         let audioLengthsName = session.outputNames.dropFirst().first ?? "audio_lengths"
         let validFrameCount = outputs[audioLengthsName]?.toInt32s()?.first.map(Int.init)
 
-        return interleaveChannelMajorAudio(
+        return interleaveChannelMajorAudioSamples(
             Array(outputData),
             shape: outputTensor.shape,
             validFrames: validFrameCount
@@ -219,6 +230,42 @@ public final class AudioTokenizerONNX: @unchecked Sendable, MOSSAudioTokenizer {
     public func decode(codes: [[Int32]], to outputPath: String) async throws {
         let samples = try await decode(codes: codes)
         try await saveAudio(samples: samples, to: outputPath)
+    }
+
+    func decodeIncrementally(
+        codes: [[Int32]],
+        framesPerChunk: Int = 8
+    ) async throws -> [[Float]] {
+        guard !codes.isEmpty else { return [] }
+
+        if let decodeStepSession {
+            let streamingSession = CodecStreamingDecodeSession(session: decodeStepSession, config: config)
+            defer { streamingSession.reset() }
+
+            var decodedChunks: [[Float]] = []
+            var startIndex = 0
+            while startIndex < codes.count {
+                let endIndex = min(startIndex + max(1, framesPerChunk), codes.count)
+                let frameChunk = Array(codes[startIndex..<endIndex])
+                if let samples = try streamingSession.runFrames(frameChunk), !samples.isEmpty {
+                    decodedChunks.append(samples)
+                }
+                startIndex = endIndex
+            }
+            return decodedChunks
+        }
+
+        let samples = try await decode(codes: codes)
+        return [samples]
+    }
+
+    func makeIncrementalDecoder(framesPerChunk: Int = 8) -> IncrementalAudioDecoder {
+        IncrementalAudioDecoder(
+            tokenizer: self,
+            decodeStepSession: decodeStepSession,
+            config: config,
+            framesPerChunk: framesPerChunk
+        )
     }
     
     // MARK: - 私有方法
@@ -290,33 +337,12 @@ public final class AudioTokenizerONNX: @unchecked Sendable, MOSSAudioTokenizer {
         return samples + samples
     }
     
-    private func interleaveChannelMajorAudio(
+    fileprivate func interleaveChannelMajorAudio(
         _ samples: [Float],
         shape: [Int],
         validFrames: Int? = nil
     ) -> [Float] {
-        guard shape.count >= 3 else { return samples }
-        let channels = shape[shape.count - 2]
-        let frames = shape[shape.count - 1]
-        let trimmedFrames = max(0, min(validFrames ?? frames, frames))
-        guard channels == 2, samples.count >= channels * frames else {
-            if let validFrames = validFrames, validFrames < samples.count {
-                return Array(samples.prefix(validFrames))
-            }
-            return samples
-        }
-        
-        var interleaved: [Float] = []
-        interleaved.reserveCapacity(channels * trimmedFrames)
-        let leftOffset = 0
-        let rightOffset = frames
-        
-        for index in 0..<trimmedFrames {
-            interleaved.append(samples[leftOffset + index])
-            interleaved.append(samples[rightOffset + index])
-        }
-        
-        return interleaved
+        interleaveChannelMajorAudioSamples(samples, shape: shape, validFrames: validFrames)
     }
     
     /// 保存音频文件
@@ -365,4 +391,188 @@ public final class AudioTokenizerONNX: @unchecked Sendable, MOSSAudioTokenizer {
         // 写入文件
         try audioFile.write(from: buffer)
     }
+}
+
+final class IncrementalAudioDecoder {
+    private let tokenizer: AudioTokenizerONNX
+    private let config: AudioTokenizerConfig
+    private let framesPerChunk: Int
+    private let streamingSession: CodecStreamingDecodeSession?
+    private var pendingFrames: [[Int32]] = []
+    private var fallbackBufferedFrames: [[Int32]] = []
+
+    init(
+        tokenizer: AudioTokenizerONNX,
+        decodeStepSession: ONNXSession?,
+        config: AudioTokenizerConfig,
+        framesPerChunk: Int
+    ) {
+        self.tokenizer = tokenizer
+        self.config = config
+        self.framesPerChunk = max(1, framesPerChunk)
+        self.streamingSession = decodeStepSession.map { CodecStreamingDecodeSession(session: $0, config: config) }
+    }
+
+    func append(frameCodes: [Int32]) throws -> [Float]? {
+        if let streamingSession {
+            pendingFrames.append(frameCodes)
+            guard pendingFrames.count >= framesPerChunk else {
+                return nil
+            }
+            let frames = pendingFrames
+            pendingFrames.removeAll(keepingCapacity: true)
+            return try streamingSession.runFrames(frames)
+        }
+
+        fallbackBufferedFrames.append(frameCodes)
+        return nil
+    }
+
+    func finish() async throws -> [Float]? {
+        if let streamingSession {
+            defer { streamingSession.reset() }
+            guard !pendingFrames.isEmpty else {
+                return nil
+            }
+            let frames = pendingFrames
+            pendingFrames.removeAll(keepingCapacity: true)
+            return try streamingSession.runFrames(frames)
+        }
+
+        guard !fallbackBufferedFrames.isEmpty else {
+            return nil
+        }
+        let frames = fallbackBufferedFrames
+        fallbackBufferedFrames.removeAll(keepingCapacity: true)
+        return try await tokenizer.decode(codes: frames)
+    }
+}
+
+private final class CodecStreamingDecodeSession {
+    private let session: ONNXSession
+    private let config: AudioTokenizerConfig
+    private var stateFeeds: [String: ONNXTensor] = [:]
+
+    private static let transformerLayerCount = 4
+    private static let attentionCapacities = [500, 500, 500, 500, 800, 800, 1200, 1200, 1600, 1600, 1600, 1600]
+    private static let attentionHeads = 4
+    private static let attentionHeadDim = 64
+
+    init(session: ONNXSession, config: AudioTokenizerConfig) {
+        self.session = session
+        self.config = config
+        reset()
+    }
+
+    func reset() {
+        stateFeeds.removeAll(keepingCapacity: true)
+
+        for index in 0..<Self.transformerLayerCount {
+            stateFeeds["transformer_offset_\(index)"] = .int32s([0], shape: [1])
+        }
+
+        for (index, capacity) in Self.attentionCapacities.enumerated() {
+            stateFeeds["attn_offset_\(index)"] = .int32s([0], shape: [1])
+            stateFeeds["attn_cached_keys_\(index)"] = .floats(
+                [Float](repeating: 0, count: Self.attentionHeads * capacity * Self.attentionHeadDim),
+                shape: [1, Self.attentionHeads, capacity, Self.attentionHeadDim]
+            )
+            stateFeeds["attn_cached_values_\(index)"] = .floats(
+                [Float](repeating: 0, count: Self.attentionHeads * capacity * Self.attentionHeadDim),
+                shape: [1, Self.attentionHeads, capacity, Self.attentionHeadDim]
+            )
+            stateFeeds["attn_cached_positions_\(index)"] = .int32s(
+                [Int32](repeating: -1, count: capacity),
+                shape: [1, capacity]
+            )
+        }
+    }
+
+    func runFrames(_ frameRows: [[Int32]]) throws -> [Float]? {
+        guard !frameRows.isEmpty else { return nil }
+
+        var flatCodes: [Int32] = []
+        flatCodes.reserveCapacity(frameRows.count * config.numCodebooks)
+        for frame in frameRows {
+            if frame.count >= config.numCodebooks {
+                flatCodes.append(contentsOf: frame.prefix(config.numCodebooks))
+            } else {
+                flatCodes.append(contentsOf: frame)
+                flatCodes.append(contentsOf: repeatElement(0, count: config.numCodebooks - frame.count))
+            }
+        }
+
+        var inputs: [String: ONNXTensor] = [
+            "audio_codes": .int32s(flatCodes, shape: [1, frameRows.count, config.numCodebooks]),
+            "audio_code_lengths": .int32s([Int32(frameRows.count)], shape: [1]),
+        ]
+        for (name, tensor) in stateFeeds {
+            inputs[name] = tensor
+        }
+
+        let outputs = try session.run(inputs: inputs, outputs: session.outputNames)
+
+        for index in 0..<Self.transformerLayerCount {
+            if let output = outputs["transformer_offset_out_\(index)"] {
+                stateFeeds["transformer_offset_\(index)"] = output
+            }
+        }
+
+        for index in 0..<Self.attentionCapacities.count {
+            if let output = outputs["attn_offset_out_\(index)"] {
+                stateFeeds["attn_offset_\(index)"] = output
+            }
+            if let output = outputs["attn_cached_keys_out_\(index)"] {
+                stateFeeds["attn_cached_keys_\(index)"] = output
+            }
+            if let output = outputs["attn_cached_values_out_\(index)"] {
+                stateFeeds["attn_cached_values_\(index)"] = output
+            }
+            if let output = outputs["attn_cached_positions_out_\(index)"] {
+                stateFeeds["attn_cached_positions_\(index)"] = output
+            }
+        }
+
+        guard let outputTensor = outputs["audio"],
+              let outputData = outputTensor.toFloats() else {
+            throw MOSSTTSError.inferenceFailed("Failed to get streaming decoder audio output")
+        }
+
+        let validFrameCount = outputs["audio_lengths"]?.toInt32s()?.first.map(Int.init)
+        let samples = interleaveChannelMajorAudioSamples(
+            Array(outputData),
+            shape: outputTensor.shape,
+            validFrames: validFrameCount
+        )
+        return samples.isEmpty ? nil : samples
+    }
+}
+
+private func interleaveChannelMajorAudioSamples(
+    _ samples: [Float],
+    shape: [Int],
+    validFrames: Int? = nil
+) -> [Float] {
+    guard shape.count >= 3 else { return samples }
+    let channels = shape[shape.count - 2]
+    let frames = shape[shape.count - 1]
+    let trimmedFrames = max(0, min(validFrames ?? frames, frames))
+    guard channels == 2, samples.count >= channels * frames else {
+        if let validFrames = validFrames, validFrames < samples.count {
+            return Array(samples.prefix(validFrames))
+        }
+        return samples
+    }
+
+    var interleaved: [Float] = []
+    interleaved.reserveCapacity(channels * trimmedFrames)
+    let leftOffset = 0
+    let rightOffset = frames
+
+    for index in 0..<trimmedFrames {
+        interleaved.append(samples[leftOffset + index])
+        interleaved.append(samples[rightOffset + index])
+    }
+
+    return interleaved
 }

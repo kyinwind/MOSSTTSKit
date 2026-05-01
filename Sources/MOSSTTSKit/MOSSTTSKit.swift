@@ -564,8 +564,8 @@ public actor MOSSTTSKit {
         let channels = options.channels
 
         var allSamples: [Float] = []
-        var generatedCodes: [[Int32]] = []
         var currentStep = 0
+        let incrementalDecoder = audioTokenizer.makeIncrementalDecoder()
 
         let codeStream = await engine.streamAudioCodes(
             textTokenIds: textTokens,
@@ -579,8 +579,12 @@ public actor MOSSTTSKit {
         )
 
         for try await frameCodes in codeStream {
-            generatedCodes.append(frameCodes)
             currentStep += 1
+
+            if let decodedSamples = try incrementalDecoder.append(frameCodes: frameCodes), !decodedSamples.isEmpty {
+                let adaptedSamples = adaptChannels(decodedSamples, from: audioTokenizer.numChannels, to: channels)
+                allSamples.append(contentsOf: adaptedSamples)
+            }
 
             if let progressCallback {
                 let progress = MOSSProgress(
@@ -594,8 +598,7 @@ public actor MOSSTTSKit {
             }
         }
 
-        if !generatedCodes.isEmpty {
-            let decodedSamples = try await audioTokenizer.decode(codes: generatedCodes)
+        if let decodedSamples = try await incrementalDecoder.finish(), !decodedSamples.isEmpty {
             let adaptedSamples = adaptChannels(decodedSamples, from: audioTokenizer.numChannels, to: channels)
             allSamples.append(contentsOf: adaptedSamples)
         }
