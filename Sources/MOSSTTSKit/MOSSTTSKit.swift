@@ -186,52 +186,59 @@ public actor MOSSTTSKit {
         progressCallback: MOSSProgressCallback = nil
     ) async throws -> TTSResult {
         let opts = options ?? self.options
-        
-        // 1. 文本预处理
+
         let processedText = preprocessText(text)
-        
-        // 2. 文本编码
-        let textEncoding = try await textTokenizer.encode(processedText)
-        let textTokens = textEncoding.ids.map { Int32($0) }
-        
-        // 3. 获取参考音频 codes。MOSS-TTS-Nano 使用 prompt acoustic codes 表达音色。
-        let promptAudioCodes: [[Int32]]
-        if let codes = speaker?.referenceAudioCodes, !codes.isEmpty {
-            promptAudioCodes = codes
-        } else if let codes = browserManifest?.builtinVoices.first?.promptAudioCodes, !codes.isEmpty {
-            promptAudioCodes = codes
-        } else {
-            throw MOSSTTSError.invalidInput("No speaker reference audio codes are available")
-        }
-        
+        let promptAudioCodes = try resolvePromptAudioCodes(for: speaker)
         guard let manifest = browserManifest else {
             throw MOSSTTSError.modelNotFound("browser_poc_manifest.json is required for ONNX generation")
         }
-        
-        // 4. TTS 推理：当前接入真实 ONNX 的 bounded 多帧路径。
-        let maxFrames = resolvedMaxFrames(options: opts, manifest: manifest)
-        let generationResult = try await engine.generateAudioCodes(
-            textTokenIds: textTokens,
-            promptAudioCodes: promptAudioCodes,
-            manifest: manifest,
-            maxFrames: maxFrames,
-            seed: opts.seed,
-            assistantRandomU: nil,
-            audioRandomU: nil,
-            progressCallback: progressCallback
-        )
-        
-        // 5. 音频解码 (acoustic codes -> float samples)
-        let decodedSamples = try await audioTokenizer.decode(codes: generationResult.audioCodes)
-        let allSamples = adaptChannels(decodedSamples, from: audioTokenizer.numChannels, to: opts.channels)
+
+        let textChunks = try await splitTextForSynthesis(processedText, maxTokens: opts.maxTextTokensPerChunk)
+        let sampleRate = audioTokenizer.sampleRate
         let outputChannels = opts.channels
-        let outputSampleRate = audioTokenizer.sampleRate
-        
+        let maxFrames = resolvedMaxFrames(options: opts, manifest: manifest)
+
+        var allSamples: [Float] = []
+        var completedFrameSteps = 0
+        let estimatedTotalSteps = maxFrames * max(1, textChunks.count)
+
+        for (index, chunkText) in textChunks.enumerated() {
+            let completedFrameStepsSnapshot = completedFrameSteps
+            let audioSamplesSnapshot = allSamples
+            let chunkResult = try await synthesizeSingleChunk(
+                originalText: text,
+                processedText: chunkText,
+                promptAudioCodes: promptAudioCodes,
+                manifest: manifest,
+                options: opts
+            ) { progress in
+                guard let progressCallback else { return true }
+                return progressCallback(
+                    MOSSProgress(
+                        audioSamples: audioSamplesSnapshot,
+                        currentStep: completedFrameStepsSnapshot + progress.currentStep,
+                        totalSteps: estimatedTotalSteps
+                    )
+                )
+            }
+
+            allSamples.append(contentsOf: chunkResult.audioSamples)
+            completedFrameSteps += maxFrames
+
+            if index < textChunks.count - 1 {
+                allSamples.append(contentsOf: makeInterChunkPauseSamples(
+                    for: chunkText,
+                    sampleRate: sampleRate,
+                    channels: outputChannels
+                ))
+            }
+        }
+
         return TTSResult(
             audioSamples: allSamples,
-            sampleRate: outputSampleRate,
+            sampleRate: sampleRate,
             channels: outputChannels,
-            duration: Double(allSamples.count) / Double(outputSampleRate * outputChannels),
+            duration: Double(allSamples.count) / Double(sampleRate * outputChannels),
             metadata: TTSMetadata(
                 text: text,
                 processedText: processedText,
@@ -248,70 +255,90 @@ public actor MOSSTTSKit {
     ) async throws -> AsyncThrowingStream<MOSSTTSStreamChunk, Error> {
         let opts = options ?? self.options
         let processedText = preprocessText(text)
-        let textEncoding = try await textTokenizer.encode(processedText)
-        let textTokens = textEncoding.ids.map { Int32($0) }
-        
-        let promptAudioCodes: [[Int32]]
-        if let codes = speaker?.referenceAudioCodes, !codes.isEmpty {
-            promptAudioCodes = codes
-        } else if let codes = browserManifest?.builtinVoices.first?.promptAudioCodes, !codes.isEmpty {
-            promptAudioCodes = codes
-        } else {
-            throw MOSSTTSError.invalidInput("No speaker reference audio codes are available")
-        }
+        let promptAudioCodes = try resolvePromptAudioCodes(for: speaker)
         
         guard let manifest = browserManifest else {
             throw MOSSTTSError.modelNotFound("browser_poc_manifest.json is required for ONNX generation")
         }
         
+        let textChunks = try await splitTextForSynthesis(processedText, maxTokens: opts.maxTextTokensPerChunk)
         let maxFrames = resolvedMaxFrames(options: opts, manifest: manifest)
         let sampleRate = audioTokenizer.sampleRate
         let channels = opts.channels
-        let codeStream = await engine.streamAudioCodes(
-            textTokenIds: textTokens,
-            promptAudioCodes: promptAudioCodes,
-            manifest: manifest,
-            maxFrames: maxFrames,
-            seed: opts.seed,
-            assistantRandomU: nil,
-            audioRandomU: nil
-        )
+        let estimatedTotalSteps = maxFrames * max(1, textChunks.count)
         
         return AsyncThrowingStream { continuation in
             let task = Task {
                 var allSamples: [Float] = []
                 do {
                     var step = 0
-                    for try await frameCodes in codeStream {
-                        step += 1
-                        let decodedSamples = try await self.audioTokenizer.decode(codes: [frameCodes])
-                        let chunkSamples = self.adaptChannels(
-                            decodedSamples,
-                            from: self.audioTokenizer.numChannels,
-                            to: channels
+                    for (index, chunkText) in textChunks.enumerated() {
+                        let textEncoding = try await self.textTokenizer.encode(chunkText)
+                        let textTokens = textEncoding.ids.map { Int32($0) }
+                        let codeStream = await self.engine.streamAudioCodes(
+                            textTokenIds: textTokens,
+                            promptAudioCodes: promptAudioCodes,
+                            manifest: manifest,
+                            maxFrames: maxFrames,
+                            seed: opts.seed,
+                            assistantRandomU: nil,
+                            audioRandomU: nil
                         )
-                        allSamples.append(contentsOf: chunkSamples)
-                        continuation.yield(
-                            MOSSTTSStreamChunk(
-                                audioSamples: allSamples,
-                                newAudioSamples: chunkSamples,
-                                currentStep: step,
-                                totalSteps: maxFrames,
-                                sampleRate: sampleRate,
-                                channels: channels,
-                                text: text,
-                                processedText: processedText,
-                                modelVariant: self.variant,
-                                isFinal: false
+
+                        for try await frameCodes in codeStream {
+                            step += 1
+                            let decodedSamples = try await self.audioTokenizer.decode(codes: [frameCodes])
+                            let chunkSamples = self.adaptChannels(
+                                decodedSamples,
+                                from: self.audioTokenizer.numChannels,
+                                to: channels
                             )
-                        )
+                            allSamples.append(contentsOf: chunkSamples)
+                            continuation.yield(
+                                MOSSTTSStreamChunk(
+                                    audioSamples: allSamples,
+                                    newAudioSamples: chunkSamples,
+                                    currentStep: step,
+                                    totalSteps: estimatedTotalSteps,
+                                    sampleRate: sampleRate,
+                                    channels: channels,
+                                    text: text,
+                                    processedText: processedText,
+                                    modelVariant: self.variant,
+                                    isFinal: false
+                                )
+                            )
+                        }
+
+                        if index < textChunks.count - 1 {
+                            let pauseSamples = self.makeInterChunkPauseSamples(
+                                for: chunkText,
+                                sampleRate: sampleRate,
+                                channels: channels
+                            )
+                            allSamples.append(contentsOf: pauseSamples)
+                            continuation.yield(
+                                MOSSTTSStreamChunk(
+                                    audioSamples: allSamples,
+                                    newAudioSamples: pauseSamples,
+                                    currentStep: step,
+                                    totalSteps: estimatedTotalSteps,
+                                    sampleRate: sampleRate,
+                                    channels: channels,
+                                    text: text,
+                                    processedText: processedText,
+                                    modelVariant: self.variant,
+                                    isFinal: false
+                                )
+                            )
+                        }
                     }
                     continuation.yield(
                         MOSSTTSStreamChunk(
                             audioSamples: allSamples,
                             newAudioSamples: [],
-                            currentStep: min(allSamples.isEmpty ? 0 : maxFrames, maxFrames),
-                            totalSteps: maxFrames,
+                            currentStep: step,
+                            totalSteps: estimatedTotalSteps,
                             sampleRate: sampleRate,
                             channels: channels,
                             text: text,
@@ -460,9 +487,308 @@ public actor MOSSTTSKit {
     private func preprocessText(_ text: String) -> String {
         var processed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         processed = processed.replacingOccurrences(of: "\n", with: " ")
-        processed = processed.replacingOccurrences(of: "  ", with: " ")
+        while processed.contains("  ") {
+            processed = processed.replacingOccurrences(of: "  ", with: " ")
+        }
         return processed
     }
+
+    private func synthesizeSingleChunk(
+        originalText: String,
+        processedText: String,
+        promptAudioCodes: [[Int32]],
+        manifest: MOSSBrowserManifest,
+        options: MOSSTTSOptions,
+        progressCallback: MOSSProgressCallback = nil
+    ) async throws -> TTSResult {
+        let textEncoding = try await textTokenizer.encode(processedText)
+        let textTokens = textEncoding.ids.map { Int32($0) }
+        let maxFrames = resolvedMaxFrames(options: options, manifest: manifest)
+        let generationResult = try await engine.generateAudioCodes(
+            textTokenIds: textTokens,
+            promptAudioCodes: promptAudioCodes,
+            manifest: manifest,
+            maxFrames: maxFrames,
+            seed: options.seed,
+            assistantRandomU: nil,
+            audioRandomU: nil,
+            progressCallback: progressCallback
+        )
+
+        let decodedSamples = try await audioTokenizer.decode(codes: generationResult.audioCodes)
+        let allSamples = adaptChannels(decodedSamples, from: audioTokenizer.numChannels, to: options.channels)
+        let sampleRate = audioTokenizer.sampleRate
+        let channels = options.channels
+
+        return TTSResult(
+            audioSamples: allSamples,
+            sampleRate: sampleRate,
+            channels: channels,
+            duration: Double(allSamples.count) / Double(sampleRate * channels),
+            metadata: TTSMetadata(
+                text: originalText,
+                processedText: processedText,
+                modelVariant: variant
+            )
+        )
+    }
+
+    private func resolvePromptAudioCodes(for speaker: MOSSSpeaker?) throws -> [[Int32]] {
+        if let codes = speaker?.referenceAudioCodes, !codes.isEmpty {
+            return codes
+        }
+        if let codes = browserManifest?.builtinVoices.first?.promptAudioCodes, !codes.isEmpty {
+            return codes
+        }
+        throw MOSSTTSError.invalidInput("No speaker reference audio codes are available")
+    }
+
+    private func splitTextForSynthesis(_ text: String, maxTokens: Int) async throws -> [String] {
+        let normalizedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedText.isEmpty else {
+            throw MOSSTTSError.invalidInput("Text prompt cannot be empty")
+        }
+
+        if try await countTextTokens(normalizedText) <= maxTokens {
+            return [normalizedText]
+        }
+
+        let preparedText = prepareTextForSentenceChunking(normalizedText)
+        let sentenceCandidates = splitTextByPunctuation(preparedText, punctuation: Self.sentenceEndPunctuation)
+        let normalizedCandidates = sentenceCandidates.isEmpty ? [preparedText] : sentenceCandidates
+
+        var sentenceSlices: [(Int, String)] = []
+        for sentence in normalizedCandidates {
+            let normalizedSentence = sentence.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !normalizedSentence.isEmpty else { continue }
+
+            let sentenceTokenCount = try await countTextTokens(normalizedSentence)
+            if sentenceTokenCount <= maxTokens {
+                sentenceSlices.append((sentenceTokenCount, normalizedSentence))
+                continue
+            }
+
+            var clauseCandidates = splitTextByPunctuation(normalizedSentence, punctuation: Self.clauseSplitPunctuation)
+            if clauseCandidates.count <= 1 {
+                clauseCandidates = [normalizedSentence]
+            }
+
+            for clause in clauseCandidates {
+                let normalizedClause = clause.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !normalizedClause.isEmpty else { continue }
+
+                let clauseTokenCount = try await countTextTokens(normalizedClause)
+                if clauseTokenCount <= maxTokens {
+                    sentenceSlices.append((clauseTokenCount, normalizedClause))
+                    continue
+                }
+
+                for piece in try await splitTextByTokenBudget(normalizedClause, maxTokens: maxTokens) {
+                    let normalizedPiece = piece.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !normalizedPiece.isEmpty else { continue }
+                    sentenceSlices.append((try await countTextTokens(normalizedPiece), normalizedPiece))
+                }
+            }
+        }
+
+        var chunks: [String] = []
+        var currentChunk = ""
+        var currentChunkTokenCount = 0
+        for (sentenceTokenCount, sentenceText) in sentenceSlices {
+            if currentChunk.isEmpty {
+                currentChunk = sentenceText
+                currentChunkTokenCount = sentenceTokenCount
+                continue
+            }
+
+            if currentChunkTokenCount + sentenceTokenCount > maxTokens {
+                chunks.append(currentChunk.trimmingCharacters(in: .whitespacesAndNewlines))
+                currentChunk = sentenceText
+                currentChunkTokenCount = sentenceTokenCount
+            } else {
+                currentChunk = joinSentenceParts(currentChunk, sentenceText)
+                currentChunkTokenCount = try await countTextTokens(currentChunk)
+            }
+        }
+
+        if !currentChunk.isEmpty {
+            chunks.append(currentChunk.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+
+        return chunks.isEmpty ? [normalizedText] : chunks
+    }
+
+    private func countTextTokens(_ text: String) async throws -> Int {
+        try await textTokenizer.encode(text).ids.count
+    }
+
+    private func splitTextByTokenBudget(_ text: String, maxTokens: Int) async throws -> [String] {
+        var remainingText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !remainingText.isEmpty else { return [] }
+
+        var pieces: [String] = []
+        let preferredBoundaryCharacters = Self.clauseSplitPunctuation
+            .union(Self.sentenceEndPunctuation)
+            .union([" "])
+
+        while !remainingText.isEmpty {
+            if try await countTextTokens(remainingText) <= maxTokens {
+                pieces.append(remainingText)
+                break
+            }
+
+            var low = 1
+            var high = remainingText.count
+            var bestPrefixLength = 1
+
+            while low <= high {
+                let middle = (low + high) / 2
+                let candidate = String(remainingText.prefix(middle)).trimmingCharacters(in: .whitespacesAndNewlines)
+                if candidate.isEmpty {
+                    low = middle + 1
+                    continue
+                }
+
+                if try await countTextTokens(candidate) <= maxTokens {
+                    bestPrefixLength = middle
+                    low = middle + 1
+                } else {
+                    high = middle - 1
+                }
+            }
+
+            let prefix = String(remainingText.prefix(bestPrefixLength))
+            let preferredIndex = lastPreferredBoundaryIndex(in: prefix, boundaryCharacters: preferredBoundaryCharacters)
+            let cutIndex = preferredIndex ?? bestPrefixLength
+
+            var piece = String(remainingText.prefix(cutIndex)).trimmingCharacters(in: .whitespacesAndNewlines)
+            var resolvedCutIndex = cutIndex
+            if piece.isEmpty {
+                piece = prefix.trimmingCharacters(in: .whitespacesAndNewlines)
+                resolvedCutIndex = bestPrefixLength
+            }
+
+            pieces.append(piece)
+            remainingText = String(remainingText.dropFirst(resolvedCutIndex)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        return pieces
+    }
+
+    private func prepareTextForSentenceChunking(_ text: String) -> String {
+        var normalizedText = preprocessText(text)
+        guard !normalizedText.isEmpty else { return normalizedText }
+
+        if containsCJK(normalizedText) {
+            if let last = normalizedText.last, !Self.sentenceEndPunctuation.contains(last) {
+                normalizedText.append("。")
+            }
+            return normalizedText
+        }
+
+        if let first = normalizedText.first, first.isLowercase {
+            normalizedText.replaceSubrange(normalizedText.startIndex...normalizedText.startIndex, with: String(first).uppercased())
+        }
+
+        if let last = normalizedText.last, last.isLetter || last.isNumber {
+            normalizedText.append(".")
+        }
+
+        let wordCount = normalizedText.split(separator: " ").count
+        if wordCount < 5 {
+            normalizedText = "        " + normalizedText
+        }
+
+        return normalizedText
+    }
+
+    private func splitTextByPunctuation(_ text: String, punctuation: Set<Character>) -> [String] {
+        var sentences: [String] = []
+        var currentCharacters: [Character] = []
+        let characters = Array(text)
+        var index = 0
+
+        while index < characters.count {
+            let character = characters[index]
+            currentCharacters.append(character)
+
+            if punctuation.contains(character) {
+                var lookahead = index + 1
+                while lookahead < characters.count, Self.closingPunctuation.contains(characters[lookahead]) {
+                    currentCharacters.append(characters[lookahead])
+                    lookahead += 1
+                }
+
+                let sentence = String(currentCharacters).trimmingCharacters(in: .whitespacesAndNewlines)
+                if !sentence.isEmpty {
+                    sentences.append(sentence)
+                }
+                currentCharacters.removeAll(keepingCapacity: true)
+
+                while lookahead < characters.count, characters[lookahead].isWhitespace {
+                    lookahead += 1
+                }
+                index = lookahead
+                continue
+            }
+
+            index += 1
+        }
+
+        let tail = String(currentCharacters).trimmingCharacters(in: .whitespacesAndNewlines)
+        if !tail.isEmpty {
+            sentences.append(tail)
+        }
+
+        return sentences
+    }
+
+    private func joinSentenceParts(_ left: String, _ right: String) -> String {
+        if left.isEmpty { return right }
+        if right.isEmpty { return left }
+        if containsCJK(left) || containsCJK(right) {
+            return left + right
+        }
+        return left + " " + right
+    }
+
+    private func containsCJK(_ text: String) -> Bool {
+        for scalar in text.unicodeScalars {
+            switch scalar.value {
+            case 0x4E00...0x9FFF, 0x3400...0x4DBF, 0x3040...0x30FF, 0xAC00...0xD7AF:
+                return true
+            default:
+                continue
+            }
+        }
+        return false
+    }
+
+    private func lastPreferredBoundaryIndex(in text: String, boundaryCharacters: Set<Character>) -> Int? {
+        let characters = Array(text)
+        let scanMin = max(0, characters.count - 25)
+        for index in stride(from: characters.count - 1, through: scanMin, by: -1) {
+            if boundaryCharacters.contains(characters[index]) {
+                return index + 1
+            }
+        }
+        return nil
+    }
+
+    private func makeInterChunkPauseSamples(for textChunk: String, sampleRate: Int, channels: Int) -> [Float] {
+        let pauseSeconds = estimateInterChunkPauseSeconds(for: textChunk)
+        let pauseSamples = max(0, Int(round(Double(sampleRate) * pauseSeconds)) * channels)
+        return [Float](repeating: 0, count: pauseSamples)
+    }
+
+    private func estimateInterChunkPauseSeconds(for textChunk: String) -> Double {
+        let wordCount = textChunk.split(separator: " ").count
+        return wordCount <= 4 ? 0.40 : 0.24
+    }
+
+    private static let sentenceEndPunctuation: Set<Character> = ["。", "！", "？", ".", "!", "?"]
+    private static let clauseSplitPunctuation: Set<Character> = ["，", "、", "；", "：", ",", ";", ":"]
+    private static let closingPunctuation: Set<Character> = ["”", "’", "\"", "'", "）", "】", "》", "」", "』", "〉", ")", "]"]
     
     private func resolvedMaxFrames(options: MOSSTTSOptions, manifest: MOSSBrowserManifest) -> Int {
         let optionLimit = options.maxGeneratedFrames ?? options.maxLength

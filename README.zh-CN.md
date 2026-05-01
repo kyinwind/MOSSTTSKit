@@ -4,6 +4,14 @@
 
 MOSSTTSKit 是一个基于 ONNX Runtime 的 MOSS-TTS-Nano Swift Package。
 
+## 项目来源
+
+MOSSTTSKit 是一个独立的 Swift Package，建立在开源的 MOSS-TTS-Nano 项目及相关工具链之上，目标是让 MOSS-TTS-Nano 更容易集成到 Apple 平台应用中，比如 TTSMate 和其他 Swift 项目。
+
+上游 MOSS-TTS-Nano 项目地址：
+
+- [OpenMOSS / MOSS-TTS-Nano](https://github.com/OpenMOSS/MOSS-TTS-Nano)
+
 当前能力范围：
 
 - 从 HuggingFace 自动下载并缓存 MOSS-TTS-Nano TTS 模型
@@ -13,6 +21,23 @@ MOSSTTSKit 是一个基于 ONNX Runtime 的 MOSS-TTS-Nano Swift Package。
 - 通过包 API 提供模型内全部内置音色，并提供 `makeSpeaker(name:referenceAudioURL:)` 语音克隆入口
 - 提供基于 ONNX Runtime 的通用 `ONNXSession` 推理封装
 - 提供真实模型驱动的多帧 TTS 生成路径
+- 提供长文本自动切分能力，`speak(...)` 和 `speakStream(...)` 会自动分段合成、拼接，并在段间加入短暂停顿
+
+## 致谢
+
+这个包的实现参考和受益于以下开源项目：
+
+- [OpenMOSS / MOSS-TTS-Nano](https://github.com/OpenMOSS/MOSS-TTS-Nano) - 本包所封装的上游 TTS 模型、ONNX 推理流程和整体运行设计来源。
+- [Microsoft / ONNX Runtime](https://github.com/microsoft/onnxruntime) - 用于执行导出 ONNX 模型的推理运行时。
+- [microsoft / onnxruntime-swift-package-manager](https://github.com/microsoft/onnxruntime-swift-package-manager) - 本项目使用的 Swift Package 形式 ONNX Runtime 集成。
+- [Hugging Face / swift-transformers](https://github.com/huggingface/swift-transformers) - 用于 tokenizer 和部分模型加载相关的 Swift 侧集成。
+- [Google / SentencePiece](https://github.com/google/sentencepiece) - MOSS-TTS-Nano 使用的 tokenizer 模型格式来源。
+
+## 许可证
+
+本项目使用 Apache License 2.0。
+
+- [Apache-2.0 License](./LICENSE)
 
 ## 基本用法
 
@@ -27,6 +52,32 @@ try await tts.speakToFile(
     outputURL: URL(fileURLWithPath: "/tmp/moss.wav")
 )
 ```
+
+## 长文本支持
+
+`speak(...)`、`speakStream(...)` 和 `speakToFile(...)` 现在都可以直接处理长文本。
+
+MOSSTTSKit 会自动：
+
+- 把较长输入切分成多个合成 chunk
+- 优先按句末标点切分，再按从句标点切分，最后按 token 预算兜底切分
+- 把多个 chunk 的音频结果自动拼接起来，并在段间加入短暂停顿
+
+切分预算由 `MOSSTTSOptions.maxTextTokensPerChunk` 控制：
+
+```swift
+let options = MOSSTTSOptions(
+    maxGeneratedFrames: 256,
+    maxTextTokensPerChunk: 75
+)
+
+let result = try await tts.speak(
+    text: "第一段。第二段。第三段。",
+    options: options
+)
+```
+
+对于较长段落，调用方通常不需要再自己手动切分文本。
 
 ## 自动下载模型
 
@@ -197,6 +248,7 @@ let cloned = try await tts.speak(
 接入建议：
 
 - 第一轮 UI 测试建议先用 `maxGeneratedFrames: 3` 或 `8`
+- 对于较长段落，现在可以直接把完整文本交给一次 `speak(...)` 调用；只有在你想细调切分粒度时，才需要调整 `maxTextTokensPerChunk`
 - 如果要边生成边播放，优先接 `speakStream(...)`
 - 如果只想先确认链路能跑通，优先接 `speak(...)`
 - 当前版本已经适合做集成测试，但长文本性能和更完整的播放体验还需要继续打磨

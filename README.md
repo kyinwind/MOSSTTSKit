@@ -4,6 +4,14 @@
 
 MOSSTTSKit is a Swift Package wrapper for MOSS-TTS-Nano ONNX models.
 
+## Origin
+
+MOSSTTSKit is an independent Swift Package built on top of the open-source MOSS-TTS-Nano project and related tooling. It aims to make MOSS-TTS-Nano easier to integrate into Apple-platform apps such as TTSMate and other Swift projects.
+
+The upstream MOSS-TTS-Nano project is available here:
+
+- [OpenMOSS / MOSS-TTS-Nano](https://github.com/OpenMOSS/MOSS-TTS-Nano)
+
 Current package scope:
 
 - Download and cache the MOSS-TTS-Nano TTS model files from HuggingFace.
@@ -13,6 +21,23 @@ Current package scope:
 - Expose all built-in voices from the model manifest through package APIs, plus a `makeSpeaker(name:referenceAudioURL:)` API that encodes reference audio into acoustic codes for voice cloning.
 - Provide a real ONNX Runtime backed `ONNXSession` wrapper for generic tensor inference.
 - Run a verified real-model preview path: prefill, global decode step, fixed frame sampler, and audio tokenizer decode for the first generated acoustic frame.
+- Support automatic long-text chunking for `speak(...)` and `speakStream(...)`, with chunk concatenation and short pauses inserted between synthesized segments.
+
+## Acknowledgements
+
+This package builds on and benefits from the following open-source projects:
+
+- [OpenMOSS / MOSS-TTS-Nano](https://github.com/OpenMOSS/MOSS-TTS-Nano) - the upstream TTS model, ONNX runtime flow, and browser/runtime design this package is based on.
+- [Microsoft / ONNX Runtime](https://github.com/microsoft/onnxruntime) - the inference runtime used to execute the exported ONNX models.
+- [microsoft / onnxruntime-swift-package-manager](https://github.com/microsoft/onnxruntime-swift-package-manager) - the Swift Package integration used by this project.
+- [Hugging Face / swift-transformers](https://github.com/huggingface/swift-transformers) - used for tokenizer and model-loading related Swift-side integration.
+- [Google / SentencePiece](https://github.com/google/sentencepiece) - the tokenizer model format used by MOSS-TTS-Nano.
+
+## License
+
+This project is licensed under the Apache License 2.0.
+
+- [Apache-2.0 License](./LICENSE)
 
 ## Usage
 
@@ -26,6 +51,32 @@ try await tts.speakToFile(
     outputURL: URL(fileURLWithPath: "/tmp/moss.wav")
 )
 ```
+
+## Long-Text Support
+
+`speak(...)`, `speakStream(...)`, and `speakToFile(...)` now support long text directly.
+
+MOSSTTSKit will:
+
+- split longer input into multiple synthesis chunks automatically
+- prefer sentence-ending punctuation first, then clause punctuation, then token-budget fallback splitting
+- concatenate chunk audio and insert short pauses between chunks
+
+The chunking budget is controlled by `MOSSTTSOptions.maxTextTokensPerChunk`:
+
+```swift
+let options = MOSSTTSOptions(
+    maxGeneratedFrames: 256,
+    maxTextTokensPerChunk: 75
+)
+
+let result = try await tts.speak(
+    text: "第一段。第二段。第三段。",
+    options: options
+)
+```
+
+For longer paragraphs, you usually do not need to split text manually in the caller anymore.
 
 ## Automatic Model Download
 
@@ -196,6 +247,7 @@ let cloned = try await tts.speak(
 Integration notes:
 
 - Start with `maxGeneratedFrames: 3` or `8` for the first UI test.
+- For longer paragraphs, the package now chunks text automatically. You can usually keep the full text in one `speak(...)` call and tune `maxTextTokensPerChunk` only when you need finer control.
 - Default auto-download cache on macOS is `~/Library/Caches/MOSSTTSKit/Models`.
 - `speakStream(...)` is the best fit if TTSMate wants progressive playback.
 - `speak(...)` is better for a quick blocking smoke test.
