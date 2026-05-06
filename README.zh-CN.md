@@ -59,6 +59,7 @@ try await tts.speakToFile(
 
 MOSSTTSKit 会自动：
 
+- 在 tokenization 前规范化容易导致不稳定输出的标点和换行
 - 把较长输入切分成多个合成 chunk
 - 优先按句末标点切分，再按从句标点切分，最后按 token 预算兜底切分
 - 把多个 chunk 的音频结果自动拼接起来，并在段间加入短暂停顿
@@ -84,6 +85,8 @@ let result = try await tts.speak(
 - 对于正式的长文本合成，不建议再手动设置较小的 `maxGeneratedFrames`，除非你本来就只想做短预览。
 - 当 `maxGeneratedFrames` 保持为 `nil` 时，MOSSTTSKit 会回退到模型 manifest 里的默认上限，这是普通句子和段落合成时更推荐的行为。
 - 像 `8`、`16`、`32`、`64` 这样的较小帧上限，更适合 smoke test、进度 UI 联调和短句试听。
+
+文本预处理统一放在 `TextNormalizer` 中维护。目前会把省略号转换成句子停顿，把非空换行视为边界，并修正 `Taiguanglin：` 这类结尾悬空标点。新增文本规则时，请参考 [docs/text-normalization.md](./docs/text-normalization.md) 中的工程约定。
 
 ## 自动下载模型
 

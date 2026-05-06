@@ -11,12 +11,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Automatic long-text chunking for `speak(...)`, `speakStream(...)`, and `speakToFile(...)`
 - `MOSSTTSOptions.maxTextTokensPerChunk` for controlling per-chunk token budget
 - `MOSSTTSOptions.maxReferenceAudioDuration`, `MOSSTTSOptions.maxReferenceAudioPromptFrames`, and `makeSpeaker(..., maxDuration:)` for bounded voice-clone reference audio encoding and prompt prefill
+- Centralized `TextNormalizer` preprocessing for punctuation and line-boundary handling before tokenization
 - Inter-chunk pause insertion for more natural long-form playback
 - Internal regression sample generator coverage for listening-based verification
 
 ### Fixed
 
 - Ellipsis normalization for Chinese text so `……` / `...` are treated as sentence-level pauses instead of model input tokens that can cause skipped speech
+- Dangling terminal clause punctuation such as `Taiguanglin：`, which could produce unexpectedly long or unstable audio
 - Tokenizer normalization alignment with the upstream SentencePiece behavior
 - Chinese punctuation tokenization issues that could introduce incorrect spoken syllables
 - Audio tokenizer decode trimming using `audio_lengths`

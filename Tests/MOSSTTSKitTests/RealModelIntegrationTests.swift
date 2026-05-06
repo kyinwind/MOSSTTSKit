@@ -12,12 +12,12 @@ final class RealModelIntegrationTests: XCTestCase {
             throw XCTSkip("MOSS-TTS model files are not available in the default cache")
         }
 
-        let tts = try await MOSSTTSKit(
+        _ = try await MOSSTTSKit(
             ttsModelDir: ttsDir,
             audioTokenizerDir: audioTokenizerDir,
             options: MOSSTTSOptions(maxGeneratedFrames: 1)
         )
-        let processed = await tts.preprocessText("""
+        let processed = TextNormalizer().normalize("""
         利娜正睡在我身边，她的双手握着，就像她平常睡觉时那样……
 
         我一点都不想再睡了。
@@ -26,6 +26,9 @@ final class RealModelIntegrationTests: XCTestCase {
         XCTAssertFalse(processed.contains("…"))
         XCTAssertTrue(processed.contains("那样。 我一点"))
         XCTAssertFalse(processed.contains("。。"))
+
+        let speakerLabel = TextNormalizer().normalize("Taiguanglin：")
+        XCTAssertEqual(speakerLabel, "Taiguanglin.")
     }
 
     func testDecodeBuiltinVoiceCodesWhenModelsAreAvailable() async throws {

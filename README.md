@@ -58,6 +58,7 @@ try await tts.speakToFile(
 
 MOSSTTSKit will:
 
+- normalize risky punctuation and line breaks before tokenization
 - split longer input into multiple synthesis chunks automatically
 - prefer sentence-ending punctuation first, then clause punctuation, then token-budget fallback splitting
 - concatenate chunk audio and insert short pauses between chunks
@@ -83,6 +84,8 @@ Important:
 - Do not set a small `maxGeneratedFrames` value for long-form synthesis unless you intentionally want a short preview.
 - If `maxGeneratedFrames` is left as `nil`, MOSSTTSKit will fall back to the model manifest default, which is the recommended behavior for normal sentence and paragraph synthesis.
 - Small frame caps such as `8`, `16`, `32`, or `64` are best reserved for smoke tests, progress UI testing, and short preview generation.
+
+Text preprocessing is centralized in `TextNormalizer`. It currently converts ellipses into sentence pauses, treats non-empty line breaks as boundaries, and fixes dangling final punctuation such as `Taiguanglin：`. See [docs/text-normalization.md](./docs/text-normalization.md) for the engineering rule used when adding new text rules.
 
 ## Automatic Model Download
 

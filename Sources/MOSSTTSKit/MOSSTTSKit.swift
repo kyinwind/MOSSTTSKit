@@ -73,6 +73,7 @@ public actor MOSSTTSKit {
     // MARK: - Private Properties
     
     private let downloader: ModelDownloader
+    private let textNormalizer = TextNormalizer()
     
     // MARK: - Initialization
     
@@ -204,6 +205,7 @@ public actor MOSSTTSKit {
         let estimatedTotalSteps = maxFrames * max(1, textChunks.count)
 
         for (index, chunkText) in textChunks.enumerated() {
+            let cancellationFlag = CancellationFlag()
             let completedFrameStepsSnapshot = completedFrameSteps
             let chunkIndex = index + 1
             let generatedSampleCountSnapshot = allSamples.count
@@ -216,7 +218,7 @@ public actor MOSSTTSKit {
                 randomSource: randomSource
             ) { progress in
                 guard let progressCallback else { return true }
-                return progressCallback(
+                let shouldContinue = progressCallback(
                     MOSSProgress(
                         audioSamples: [],
                         currentStep: completedFrameStepsSnapshot + progress.currentStep,
@@ -228,9 +230,18 @@ public actor MOSSTTSKit {
                         isChunkBoundary: false
                     )
                 )
+                if !shouldContinue {
+                    cancellationFlag.cancel()
+                }
+                return shouldContinue
             }
 
             allSamples.append(contentsOf: chunkResult.audioSamples)
+
+            if cancellationFlag.isCancelled {
+                break
+            }
+
             completedFrameSteps += maxFrames
 
             if index < textChunks.count - 1 {
@@ -513,95 +524,8 @@ public actor MOSSTTSKit {
     
     // MARK: - Private
     
-    /// 简单文本预处理
     func preprocessText(_ text: String) -> String {
-        var processed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        processed = normalizeEllipses(in: processed)
-        processed = normalizeLineBreakBoundaries(in: processed)
-        while processed.contains("  ") {
-            processed = processed.replacingOccurrences(of: "  ", with: " ")
-        }
-        return processed
-    }
-
-    private func normalizeEllipses(in text: String) -> String {
-        guard text.contains("…") || text.contains("...") else { return text }
-
-        let sentenceTerminator: Character = containsCJK(text) ? "。" : "."
-        let characters = Array(text)
-        var result: [Character] = []
-        result.reserveCapacity(characters.count)
-
-        var index = 0
-        while index < characters.count {
-            let character = characters[index]
-
-            if character == "…" {
-                while index < characters.count, characters[index] == "…" {
-                    index += 1
-                }
-                appendSentenceTerminator(sentenceTerminator, to: &result)
-                continue
-            }
-
-            if character == "." {
-                var runEnd = index
-                while runEnd < characters.count, characters[runEnd] == "." {
-                    runEnd += 1
-                }
-
-                if runEnd - index >= 3 {
-                    appendSentenceTerminator(sentenceTerminator, to: &result)
-                    index = runEnd
-                    continue
-                }
-            }
-
-            result.append(character)
-            index += 1
-        }
-
-        return String(result)
-    }
-
-    private func appendSentenceTerminator(_ terminator: Character, to result: inout [Character]) {
-        while let last = result.last, last.isWhitespace {
-            result.removeLast()
-        }
-        if let last = result.last, Self.sentenceEndPunctuation.contains(last) {
-            return
-        }
-        result.append(terminator)
-    }
-
-    private func normalizeLineBreakBoundaries(in text: String) -> String {
-        let normalizedNewlines = text
-            .replacingOccurrences(of: "\r\n", with: "\n")
-            .replacingOccurrences(of: "\r", with: "\n")
-
-        let parts = normalizedNewlines
-            .split(separator: "\n", omittingEmptySubsequences: false)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-
-        guard !parts.isEmpty else { return "" }
-
-        var result = ""
-        result.reserveCapacity(normalizedNewlines.count + parts.count * 2)
-
-        for (index, part) in parts.enumerated() {
-            if index > 0 {
-                let separator = containsCJK(part) || containsCJK(result) ? "。 " : ". "
-                if let last = result.last, !Self.sentenceEndPunctuation.contains(last) {
-                    result.append(contentsOf: separator)
-                } else {
-                    result.append(" ")
-                }
-            }
-            result.append(contentsOf: part)
-        }
-
-        return result
+        textNormalizer.normalize(text)
     }
 
     private func synthesizeSingleChunk(
@@ -703,7 +627,7 @@ public actor MOSSTTSKit {
         }
 
         let preparedText = prepareTextForSentenceChunking(normalizedText)
-        let sentenceCandidates = splitTextByPunctuation(preparedText, punctuation: Self.sentenceEndPunctuation)
+        let sentenceCandidates = splitTextByPunctuation(preparedText, punctuation: TextNormalizer.sentenceEndPunctuation)
         let normalizedCandidates = sentenceCandidates.isEmpty ? [preparedText] : sentenceCandidates
 
         var sentenceSlices: [(Int, String)] = []
@@ -717,7 +641,7 @@ public actor MOSSTTSKit {
                 continue
             }
 
-            var clauseCandidates = splitTextByPunctuation(normalizedSentence, punctuation: Self.clauseSplitPunctuation)
+            var clauseCandidates = splitTextByPunctuation(normalizedSentence, punctuation: TextNormalizer.clauseSplitPunctuation)
             if clauseCandidates.count <= 1 {
                 clauseCandidates = [normalizedSentence]
             }
@@ -776,8 +700,8 @@ public actor MOSSTTSKit {
         guard !remainingText.isEmpty else { return [] }
 
         var pieces: [String] = []
-        let preferredBoundaryCharacters = Self.clauseSplitPunctuation
-            .union(Self.sentenceEndPunctuation)
+        let preferredBoundaryCharacters = TextNormalizer.clauseSplitPunctuation
+            .union(TextNormalizer.sentenceEndPunctuation)
             .union([" "])
 
         while !remainingText.isEmpty {
@@ -829,7 +753,7 @@ public actor MOSSTTSKit {
         guard !normalizedText.isEmpty else { return normalizedText }
 
         if containsCJK(normalizedText) {
-            if let last = normalizedText.last, !Self.sentenceEndPunctuation.contains(last) {
+            if let last = normalizedText.last, !TextNormalizer.sentenceEndPunctuation.contains(last) {
                 normalizedText.append("。")
             }
             return normalizedText
@@ -863,7 +787,7 @@ public actor MOSSTTSKit {
 
             if punctuation.contains(character) {
                 var lookahead = index + 1
-                while lookahead < characters.count, Self.closingPunctuation.contains(characters[lookahead]) {
+                while lookahead < characters.count, TextNormalizer.closingPunctuation.contains(characters[lookahead]) {
                     currentCharacters.append(characters[lookahead])
                     lookahead += 1
                 }
@@ -902,15 +826,7 @@ public actor MOSSTTSKit {
     }
 
     private func containsCJK(_ text: String) -> Bool {
-        for scalar in text.unicodeScalars {
-            switch scalar.value {
-            case 0x4E00...0x9FFF, 0x3400...0x4DBF, 0x3040...0x30FF, 0xAC00...0xD7AF:
-                return true
-            default:
-                continue
-            }
-        }
-        return false
+        TextNormalizer.containsCJK(text)
     }
 
     private func lastPreferredBoundaryIndex(in text: String, boundaryCharacters: Set<Character>) -> Int? {
@@ -935,10 +851,6 @@ public actor MOSSTTSKit {
         return wordCount <= 4 ? 0.40 : 0.24
     }
 
-    private static let sentenceEndPunctuation: Set<Character> = ["。", "！", "？", ".", "!", "?"]
-    private static let clauseSplitPunctuation: Set<Character> = ["，", "、", "；", "：", ",", ";", ":"]
-    private static let closingPunctuation: Set<Character> = ["”", "’", "\"", "'", "）", "】", "》", "」", "』", "〉", ")", "]"]
-    
     private func resolvedMaxFrames(options: MOSSTTSOptions, manifest: MOSSBrowserManifest) -> Int {
         let optionLimit = options.maxGeneratedFrames ?? options.maxLength
         let manifestLimit = manifest.generationDefaults.maxNewFrames ?? optionLimit
@@ -1022,6 +934,23 @@ public actor MOSSTTSKit {
             fileData.append(rawBuffer.bindMemory(to: UInt8.self))
         }
         try fileData.write(to: url)
+    }
+}
+
+private final class CancellationFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
+
+    var isCancelled: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return value
+    }
+
+    func cancel() {
+        lock.lock()
+        value = true
+        lock.unlock()
     }
 }
 
