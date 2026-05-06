@@ -27,6 +27,7 @@ final class TokenizerTests: XCTestCase {
         XCTAssertNotNil(audioTokenizer)
         XCTAssertEqual(audioTokenizer.encodeModelPath, "/path/to/encode.onnx")
         XCTAssertEqual(audioTokenizer.decodeModelPath, "/path/to/decode.onnx")
+        XCTAssertNil(audioTokenizer.decodeStepModelPath)
     }
     
     func testAudioTokenizerONNXLoad() async throws {

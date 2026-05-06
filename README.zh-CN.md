@@ -241,7 +241,8 @@ for speaker in speakers {
 ```swift
 let speaker = try await tts.makeSpeaker(
     name: "Reference",
-    referenceAudioURL: URL(fileURLWithPath: "/path/to/reference.wav")
+    referenceAudioURL: URL(fileURLWithPath: "/path/to/reference.wav"),
+    maxDuration: 18
 )
 
 let cloned = try await tts.speak(
@@ -256,6 +257,7 @@ let cloned = try await tts.speak(
 - 第一轮 UI smoke test 或短预览，建议先用 `maxGeneratedFrames: 3` 或 `8`
 - 对于正常句子和较长段落，优先使用 `MOSSTTSOptions()`，让包默认使用模型 manifest 的帧上限
 - 对于较长段落，现在可以直接把完整文本交给一次 `speak(...)` 调用；只有在你想细调切分粒度时，才需要调整 `maxTextTokensPerChunk`
+- 语音克隆默认只读取参考音频前 `MOSSTTSOptions.maxReferenceAudioDuration` 秒，默认 `18` 秒，并默认把参与 TTS prefill 的 prompt 限制在 `maxReferenceAudioPromptFrames` 帧以内，默认 `220` 帧；需要不同参考窗口时，可以在 `makeSpeaker(...)` 里传 `maxDuration:`
 - 如果要边生成边播放，优先接 `speakStream(...)`
 - 如果只想先确认链路能跑通，优先接 `speak(...)`
 - 当前版本已经适合做集成测试，但长文本性能和更完整的播放体验还需要继续打磨
@@ -312,7 +314,8 @@ let tts = try await MOSSTTSKit(
 ```swift
 let speaker = try await tts.makeSpeaker(
     name: "Reference Voice",
-    referenceAudioURL: URL(fileURLWithPath: "/path/to/reference.wav")
+    referenceAudioURL: URL(fileURLWithPath: "/path/to/reference.wav"),
+    maxDuration: 18
 )
 
 let cloned = try await tts.speak(text: "使用参考音频音色。", speaker: speaker)

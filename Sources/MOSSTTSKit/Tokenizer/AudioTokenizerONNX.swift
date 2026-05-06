@@ -89,8 +89,12 @@ public final class AudioTokenizerONNX: @unchecked Sendable, MOSSAudioTokenizer {
     }
     
     public func encode(audioPath: String) async throws -> AudioEncodingResult {
+        try await encode(audioPath: audioPath, maxDuration: nil)
+    }
+
+    public func encode(audioPath: String, maxDuration: TimeInterval?) async throws -> AudioEncodingResult {
         // 1. 加载并预处理音频
-        let (samples, originalSR) = try await loadAudio(from: audioPath)
+        let (samples, originalSR) = try await loadAudio(from: audioPath, maxDuration: maxDuration)
         
         // 2. 重采样到目标采样率
         let resampledSamples = resample(
@@ -108,18 +112,16 @@ public final class AudioTokenizerONNX: @unchecked Sendable, MOSSAudioTokenizer {
             throw MOSSTTSError.inferenceFailed("Encoder not loaded")
         }
         
-        let inputSamples = samples.map { Float($0) }
         let frameShift = config.downsampleRate
-        let numFrames = inputSamples.count / frameShift
+        let numFrames = samples.count / frameShift
         
         // 填充到完整帧
         let paddedLength = numFrames * frameShift
-        let paddedSamples = Array(inputSamples.prefix(paddedLength))
-        guard !paddedSamples.isEmpty else {
+        guard paddedLength > 0 else {
             throw MOSSTTSError.invalidInput("Audio is too short for one tokenizer frame")
         }
         
-        let waveform = makeStereoChannelMajorSamples(fromMono: paddedSamples)
+        let waveform = makeStereoChannelMajorSamples(fromMono: samples, frameCount: paddedLength)
         
         let waveformTensor = ONNXTensor.floats(
             waveform,
@@ -271,14 +273,26 @@ public final class AudioTokenizerONNX: @unchecked Sendable, MOSSAudioTokenizer {
     // MARK: - 私有方法
     
     /// 加载音频文件
-    private func loadAudio(from path: String) async throws -> ([Float], Int) {
+    private func loadAudio(from path: String, maxDuration: TimeInterval?) async throws -> ([Float], Int) {
         let url = URL(fileURLWithPath: path)
         let audioFile = try AVAudioFile(forReading: url)
         
         let format = audioFile.processingFormat
-        let frameCount = UInt32(audioFile.length)
+        let requestedFrameCount: AVAudioFrameCount
+        if let maxDuration, maxDuration > 0 {
+            requestedFrameCount = min(
+                AVAudioFrameCount(audioFile.length),
+                AVAudioFrameCount((maxDuration * format.sampleRate).rounded(.down))
+            )
+        } else {
+            requestedFrameCount = AVAudioFrameCount(audioFile.length)
+        }
         
-        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
+        guard requestedFrameCount > 0 else {
+            throw MOSSTTSError.invalidInput("Audio is too short for one tokenizer frame")
+        }
+
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: requestedFrameCount) else {
             throw MOSSTTSError.audioProcessingFailed("Failed to create audio buffer")
         }
         
@@ -288,7 +302,8 @@ public final class AudioTokenizerONNX: @unchecked Sendable, MOSSAudioTokenizer {
         var samples: [Float] = []
         if let channelData = buffer.floatChannelData {
             let channels = Int(format.channelCount)
-            let frames = Int(frameCount)
+            let frames = Int(buffer.frameLength)
+            samples.reserveCapacity(frames)
             
             // 混音为单声道
             for frame in 0..<frames {
@@ -332,9 +347,17 @@ public final class AudioTokenizerONNX: @unchecked Sendable, MOSSAudioTokenizer {
         return resampled
     }
     
-    private func makeStereoChannelMajorSamples(fromMono samples: [Float]) -> [Float] {
-        guard config.numChannels == 2 else { return samples }
-        return samples + samples
+    private func makeStereoChannelMajorSamples(fromMono samples: [Float], frameCount: Int) -> [Float] {
+        let clippedFrameCount = min(frameCount, samples.count)
+        guard config.numChannels == 2 else {
+            return Array(samples.prefix(clippedFrameCount))
+        }
+
+        var waveform: [Float] = []
+        waveform.reserveCapacity(clippedFrameCount * 2)
+        waveform.append(contentsOf: samples.prefix(clippedFrameCount))
+        waveform.append(contentsOf: samples.prefix(clippedFrameCount))
+        return waveform
     }
     
     fileprivate func interleaveChannelMajorAudio(

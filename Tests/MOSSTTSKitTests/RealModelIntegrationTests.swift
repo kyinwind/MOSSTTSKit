@@ -2,6 +2,32 @@ import XCTest
 @testable import MOSSTTSKit
 
 final class RealModelIntegrationTests: XCTestCase {
+    func testEllipsisIsNormalizedBeforeSynthesisWhenModelsAreAvailable() async throws {
+        let downloader = ModelDownloader()
+        let ttsDir = await downloader.ttsModelDir(for: .mossTTSNano100M)
+        let audioTokenizerDir = await downloader.tokenizerModelDir(for: .mossTTSNano100M)
+        let paths = ModelPaths(ttsModelDir: ttsDir, audioTokenizerDir: audioTokenizerDir)
+
+        guard paths.availability().isComplete else {
+            throw XCTSkip("MOSS-TTS model files are not available in the default cache")
+        }
+
+        let tts = try await MOSSTTSKit(
+            ttsModelDir: ttsDir,
+            audioTokenizerDir: audioTokenizerDir,
+            options: MOSSTTSOptions(maxGeneratedFrames: 1)
+        )
+        let processed = await tts.preprocessText("""
+        利娜正睡在我身边，她的双手握着，就像她平常睡觉时那样……
+
+        我一点都不想再睡了。
+        """)
+
+        XCTAssertFalse(processed.contains("…"))
+        XCTAssertTrue(processed.contains("那样。 我一点"))
+        XCTAssertFalse(processed.contains("。。"))
+    }
+
     func testDecodeBuiltinVoiceCodesWhenModelsAreAvailable() async throws {
         let downloader = ModelDownloader()
         let ttsDir = await downloader.ttsModelDir(for: .mossTTSNano100M)

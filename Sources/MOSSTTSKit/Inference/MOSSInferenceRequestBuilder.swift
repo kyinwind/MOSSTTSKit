@@ -126,10 +126,11 @@ public struct MOSSInferenceRequestBuilder: Sendable {
             + manifest.promptTemplates.assistantPromptPrefixTokenIds
             + [config.audioStartTokenId]
         
-        let rows =
-            buildTextRows(tokenIds: prefixTextTokenIds)
-            + buildAudioPrefixRows(promptAudioCodes: promptAudioCodes)
-            + buildTextRows(tokenIds: suffixTextTokenIds)
+        var rows: [[Int32]] = []
+        rows.reserveCapacity(prefixTextTokenIds.count + promptAudioCodes.count + suffixTextTokenIds.count)
+        rows.append(contentsOf: buildTextRows(tokenIds: prefixTextTokenIds))
+        rows.append(contentsOf: buildAudioPrefixRows(promptAudioCodes: promptAudioCodes))
+        rows.append(contentsOf: buildTextRows(tokenIds: suffixTextTokenIds))
         
         return RequestRows(
             inputIds: rows,

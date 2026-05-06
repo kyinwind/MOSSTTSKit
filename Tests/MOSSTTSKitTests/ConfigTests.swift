@@ -65,6 +65,8 @@ final class ConfigTests: XCTestCase {
         let options = MOSSTTSOptions()
 
         XCTAssertNil(options.maxGeneratedFrames)
+        XCTAssertEqual(options.maxReferenceAudioDuration, 18)
+        XCTAssertEqual(options.maxReferenceAudioPromptFrames, 220)
         XCTAssertTrue(options.validate().isEmpty)
     }
     

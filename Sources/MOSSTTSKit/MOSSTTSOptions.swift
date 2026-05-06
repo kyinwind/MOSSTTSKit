@@ -40,6 +40,18 @@ public struct MOSSTTSOptions: Sendable, Equatable {
     
     /// 批量大小 (用于批处理优化)
     public var batchSize: Int
+
+    /// 语音克隆参考音频的最大读取时长（秒）。
+    ///
+    /// 参考音频通常只需要一小段清晰语音。限制读取长度可以避免调用方误传长音频时，
+    /// 在音频加载、重采样和 tokenizer 编码阶段产生过高内存峰值。
+    public var maxReferenceAudioDuration: TimeInterval?
+
+    /// 语音克隆 prompt 参与 TTS prefill 的最大 acoustic-code 帧数。
+    ///
+    /// 内置音色的 prompt 通常在几十到两百帧之间。限制过长的克隆 prompt 可以避免
+    /// 每个文本 chunk 都携带过大的参考音频上下文，降低 prefill 和 KV cache 内存峰值。
+    public var maxReferenceAudioPromptFrames: Int?
     
     // MARK: - Audio Options
     
@@ -91,6 +103,8 @@ public struct MOSSTTSOptions: Sendable, Equatable {
         maxTextTokensPerChunk: 75,
         seed: 1234,
         batchSize: 1,
+        maxReferenceAudioDuration: 12,
+        maxReferenceAudioPromptFrames: 150,
         sampleRate: 24000,
         channels: 1,
         enableSmoothing: false,
@@ -108,6 +122,8 @@ public struct MOSSTTSOptions: Sendable, Equatable {
         maxTextTokensPerChunk: 75,
         seed: 1234,
         batchSize: 4,
+        maxReferenceAudioDuration: 18,
+        maxReferenceAudioPromptFrames: 220,
         sampleRate: 48000,
         channels: 2,
         enableSmoothing: true,
@@ -125,6 +141,8 @@ public struct MOSSTTSOptions: Sendable, Equatable {
         maxTextTokensPerChunk: Int = 75,
         seed: UInt64? = 1234,
         batchSize: Int = 1,
+        maxReferenceAudioDuration: TimeInterval? = 18,
+        maxReferenceAudioPromptFrames: Int? = 220,
         sampleRate: Int = 48000,
         channels: Int = 2,
         enableSmoothing: Bool = true,
@@ -139,6 +157,8 @@ public struct MOSSTTSOptions: Sendable, Equatable {
         self.maxTextTokensPerChunk = maxTextTokensPerChunk
         self.seed = seed
         self.batchSize = batchSize
+        self.maxReferenceAudioDuration = maxReferenceAudioDuration
+        self.maxReferenceAudioPromptFrames = maxReferenceAudioPromptFrames
         self.sampleRate = sampleRate
         self.channels = channels
         self.enableSmoothing = enableSmoothing
@@ -172,6 +192,11 @@ extension MOSSTTSOptions {
             errors.append(.invalidMaxGeneratedFrames(maxGeneratedFrames))
         }
 
+        if let maxReferenceAudioPromptFrames,
+           maxReferenceAudioPromptFrames < 1 || maxReferenceAudioPromptFrames > 50000 {
+            errors.append(.invalidMaxReferenceAudioPromptFrames(maxReferenceAudioPromptFrames))
+        }
+
         if maxTextTokensPerChunk < 1 || maxTextTokensPerChunk > 50000 {
             errors.append(.invalidMaxTextTokensPerChunk(maxTextTokensPerChunk))
         }
@@ -192,6 +217,7 @@ extension MOSSTTSOptions {
         case invalidTopK(Int)
         case invalidMaxLength(Int)
         case invalidMaxGeneratedFrames(Int)
+        case invalidMaxReferenceAudioPromptFrames(Int)
         case invalidMaxTextTokensPerChunk(Int)
         case invalidSampleRate(Int)
         case invalidChannels(Int)
@@ -206,6 +232,8 @@ extension MOSSTTSOptions {
                 return "最大长度必须在 1-50000 之间，当前值: \(value)"
             case .invalidMaxGeneratedFrames(let value):
                 return "最大音频帧数必须在 1-50000 之间，当前值: \(value)"
+            case .invalidMaxReferenceAudioPromptFrames(let value):
+                return "语音克隆参考音频 prompt 帧数必须在 1-50000 之间，当前值: \(value)"
             case .invalidMaxTextTokensPerChunk(let value):
                 return "长文本切分 token 预算必须在 1-50000 之间，当前值: \(value)"
             case .invalidSampleRate(let value):

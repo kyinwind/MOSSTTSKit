@@ -240,7 +240,8 @@ for speaker in speakers {
 ```swift
 let speaker = try await tts.makeSpeaker(
     name: "Reference",
-    referenceAudioURL: URL(fileURLWithPath: "/path/to/reference.wav")
+    referenceAudioURL: URL(fileURLWithPath: "/path/to/reference.wav"),
+    maxDuration: 18
 )
 
 let cloned = try await tts.speak(
@@ -255,6 +256,7 @@ Integration notes:
 - Start with `maxGeneratedFrames: 3` or `8` only for the first UI smoke test or a deliberate short preview.
 - For normal sentence and paragraph synthesis, prefer `MOSSTTSOptions()` and let the package use the model manifest frame limit by default.
 - For longer paragraphs, the package now chunks text automatically. You can usually keep the full text in one `speak(...)` call and tune `maxTextTokensPerChunk` only when you need finer control.
+- Voice cloning reads only the first `MOSSTTSOptions.maxReferenceAudioDuration` seconds of reference audio by default (`18` seconds), and caps the prompt at `maxReferenceAudioPromptFrames` frames by default (`220`). Pass `maxDuration:` to `makeSpeaker(...)` when you need a different reference window.
 - Default auto-download cache on macOS is `~/Library/Caches/MOSSTTSKit/Models`.
 - `speakStream(...)` is the best fit if TTSMate wants progressive playback.
 - `speak(...)` is better for a quick blocking smoke test.
@@ -310,7 +312,8 @@ Preparing a cloned speaker:
 ```swift
 let speaker = try await tts.makeSpeaker(
     name: "Reference Voice",
-    referenceAudioURL: URL(fileURLWithPath: "/path/to/reference.wav")
+    referenceAudioURL: URL(fileURLWithPath: "/path/to/reference.wav"),
+    maxDuration: 18
 )
 
 let cloned = try await tts.speak(text: "使用参考音频音色。", speaker: speaker)

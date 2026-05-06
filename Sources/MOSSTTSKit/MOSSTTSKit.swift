@@ -188,7 +188,7 @@ public actor MOSSTTSKit {
         let opts = options ?? self.options
 
         let processedText = preprocessText(text)
-        let promptAudioCodes = try resolvePromptAudioCodes(for: speaker)
+        let promptAudioCodes = try resolvePromptAudioCodes(for: speaker, options: opts)
         guard let manifest = browserManifest else {
             throw MOSSTTSError.modelNotFound("browser_poc_manifest.json is required for ONNX generation")
         }
@@ -278,7 +278,7 @@ public actor MOSSTTSKit {
     ) async throws -> AsyncThrowingStream<MOSSTTSStreamChunk, Error> {
         let opts = options ?? self.options
         let processedText = preprocessText(text)
-        let promptAudioCodes = try resolvePromptAudioCodes(for: speaker)
+        let promptAudioCodes = try resolvePromptAudioCodes(for: speaker, options: opts)
         
         guard let manifest = browserManifest else {
             throw MOSSTTSError.modelNotFound("browser_poc_manifest.json is required for ONNX generation")
@@ -442,13 +442,18 @@ public actor MOSSTTSKit {
     /// 输入输出名后继续完成。
     public func makeSpeaker(
         name: String,
-        referenceAudioURL: URL
+        referenceAudioURL: URL,
+        maxDuration: TimeInterval? = nil
     ) async throws -> MOSSSpeaker {
-        let encoding = try await audioTokenizer.encode(audioPath: referenceAudioURL.path)
+        let encoding = try await audioTokenizer.encode(
+            audioPath: referenceAudioURL.path,
+            maxDuration: maxDuration ?? options.maxReferenceAudioDuration
+        )
+        let referenceAudioCodes = trimReferenceAudioCodes(encoding.codes, options: options)
         return MOSSSpeaker(
             name: name,
             referenceAudioPath: referenceAudioURL.path,
-            referenceAudioCodes: encoding.codes
+            referenceAudioCodes: referenceAudioCodes
         )
     }
     
@@ -509,13 +514,64 @@ public actor MOSSTTSKit {
     // MARK: - Private
     
     /// 简单文本预处理
-    private func preprocessText(_ text: String) -> String {
+    func preprocessText(_ text: String) -> String {
         var processed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        processed = normalizeEllipses(in: processed)
         processed = normalizeLineBreakBoundaries(in: processed)
         while processed.contains("  ") {
             processed = processed.replacingOccurrences(of: "  ", with: " ")
         }
         return processed
+    }
+
+    private func normalizeEllipses(in text: String) -> String {
+        guard text.contains("…") || text.contains("...") else { return text }
+
+        let sentenceTerminator: Character = containsCJK(text) ? "。" : "."
+        let characters = Array(text)
+        var result: [Character] = []
+        result.reserveCapacity(characters.count)
+
+        var index = 0
+        while index < characters.count {
+            let character = characters[index]
+
+            if character == "…" {
+                while index < characters.count, characters[index] == "…" {
+                    index += 1
+                }
+                appendSentenceTerminator(sentenceTerminator, to: &result)
+                continue
+            }
+
+            if character == "." {
+                var runEnd = index
+                while runEnd < characters.count, characters[runEnd] == "." {
+                    runEnd += 1
+                }
+
+                if runEnd - index >= 3 {
+                    appendSentenceTerminator(sentenceTerminator, to: &result)
+                    index = runEnd
+                    continue
+                }
+            }
+
+            result.append(character)
+            index += 1
+        }
+
+        return String(result)
+    }
+
+    private func appendSentenceTerminator(_ terminator: Character, to result: inout [Character]) {
+        while let last = result.last, last.isWhitespace {
+            result.removeLast()
+        }
+        if let last = result.last, Self.sentenceEndPunctuation.contains(last) {
+            return
+        }
+        result.append(terminator)
     }
 
     private func normalizeLineBreakBoundaries(in text: String) -> String {
@@ -616,14 +672,24 @@ public actor MOSSTTSKit {
         )
     }
 
-    private func resolvePromptAudioCodes(for speaker: MOSSSpeaker?) throws -> [[Int32]] {
+    private func resolvePromptAudioCodes(for speaker: MOSSSpeaker?, options: MOSSTTSOptions) throws -> [[Int32]] {
         if let codes = speaker?.referenceAudioCodes, !codes.isEmpty {
-            return codes
+            return trimReferenceAudioCodes(codes, options: options)
         }
         if let codes = browserManifest?.builtinVoices.first?.promptAudioCodes, !codes.isEmpty {
-            return codes
+            return trimReferenceAudioCodes(codes, options: options)
         }
         throw MOSSTTSError.invalidInput("No speaker reference audio codes are available")
+    }
+
+    private func trimReferenceAudioCodes(_ codes: [[Int32]], options: MOSSTTSOptions) -> [[Int32]] {
+        guard let maxFrames = options.maxReferenceAudioPromptFrames,
+              maxFrames > 0,
+              codes.count > maxFrames else {
+            return codes
+        }
+
+        return Array(codes.prefix(maxFrames))
     }
 
     private func splitTextForSynthesis(_ text: String, maxTokens: Int) async throws -> [String] {
