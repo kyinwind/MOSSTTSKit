@@ -19,6 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Ellipsis normalization for Chinese text so `……` / `...` are treated as sentence-level pauses instead of model input tokens that can cause skipped speech
 - Dangling terminal clause punctuation such as `Taiguanglin：`, which could produce unexpectedly long or unstable audio
+- Repeated dash separators such as `---` and `——`, which could cause unstable continuation or repeated tail speech
 - Tokenizer normalization alignment with the upstream SentencePiece behavior
 - Chinese punctuation tokenization issues that could introduce incorrect spoken syllables
 - Audio tokenizer decode trimming using `audio_lengths`

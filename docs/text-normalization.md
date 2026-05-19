@@ -17,6 +17,8 @@ small fixes across synthesis, chunking, and app integrations.
 
 - Leading and trailing whitespace is removed.
 - Chinese and ASCII ellipses are converted to sentence boundaries.
+- Repeated dash separators such as `---`, `--`, and `——` are converted to
+  sentence boundaries. Single hyphens in words such as `MOSS-TTS-Nano` are kept.
 - Non-empty line breaks are treated as phrase or sentence boundaries.
 - A dangling final clause punctuation mark, such as `：`, `:`, `，`, or `,`, is
   converted into a sentence terminator.
@@ -44,6 +46,16 @@ becomes:
 
 ```text
 Taiguanglin.
+```
+
+```text
+非常值得一读，---揭示地球史前文明。
+```
+
+becomes:
+
+```text
+非常值得一读。 揭示地球史前文明。
 ```
 
 ## Engineering Rule

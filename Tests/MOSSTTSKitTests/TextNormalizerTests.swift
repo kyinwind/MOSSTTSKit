@@ -29,6 +29,27 @@ final class TextNormalizerTests: XCTestCase {
         XCTAssertEqual(normalizer.normalize("旁白："), "旁白。")
     }
 
+    func testNormalizesAsciiDashSeparatorsToSentenceBoundary() {
+        XCTAssertEqual(
+            normalizer.normalize("非常值得一读，---揭示地球史前文明。"),
+            "非常值得一读。 揭示地球史前文明。"
+        )
+    }
+
+    func testNormalizesChineseEmDashSeparatorsToSentenceBoundary() {
+        XCTAssertEqual(
+            normalizer.normalize("他们有眼却不看，有耳却不闻。——《圣经》"),
+            "他们有眼却不看，有耳却不闻。 《圣经》"
+        )
+    }
+
+    func testKeepsSingleHyphensInWords() {
+        XCTAssertEqual(
+            normalizer.normalize("MOSS-TTS-Nano is local-first."),
+            "MOSS-TTS-Nano is local-first."
+        )
+    }
+
     func testLineBreaksBecomeSentenceBoundaries() {
         XCTAssertEqual(
             normalizer.normalize("第一行\n第二行"),
