@@ -16,6 +16,7 @@ small fixes across synthesis, chunking, and app integrations.
 ## Current Rules
 
 - Leading and trailing whitespace is removed.
+- Chinese quotation marks such as `“”`, `‘’`, `「」`, and `『』` are removed.
 - Chinese and ASCII ellipses are converted to sentence boundaries.
 - Repeated dash separators such as `---`, `--`, and `——` are converted to
   sentence boundaries. Single hyphens in words such as `MOSS-TTS-Nano` are kept.
@@ -46,6 +47,16 @@ becomes:
 
 ```text
 Taiguanglin.
+```
+
+```text
+“米歇，准确地讲，是在一百三十五万年以前。”
+```
+
+becomes:
+
+```text
+米歇，准确地讲，是在一百三十五万年以前。
 ```
 
 ```text

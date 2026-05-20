@@ -3,7 +3,7 @@ import Foundation
 /// 将用户输入文本规范化为更适合 TTS 模型的 prompt。
 ///
 /// 这里处理的是“人读起来合理，但直接喂给声学模型可能不稳定”的文本形态，
-/// 例如省略号、连续破折号、换行和结尾悬空标点。规则要尽量保守，
+/// 例如省略号、连续破折号、中文引号、换行和结尾悬空标点。规则要尽量保守，
 /// 只处理已经在真实合成中证明容易导致漏读、重复或异常延长的场景。
 public struct TextNormalizer: Sendable {
     /// 句末标点。长文本切分和换行归一化都会把这些符号视为完整句子边界。
@@ -23,6 +23,7 @@ public struct TextNormalizer: Sendable {
     /// 新规则必须足够确定，并配套 `TextNormalizerTests` 回归测试。
     public func normalize(_ text: String) -> String {
         var processed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        processed = normalizeQuotationMarks(in: processed)
         processed = normalizeEllipses(in: processed)
         processed = normalizeDashSeparators(in: processed)
         processed = normalizeLineBreakBoundaries(in: processed)
@@ -44,6 +45,18 @@ public struct TextNormalizer: Sendable {
             }
         }
         return false
+    }
+
+    /// 移除中文排版引号。
+    ///
+    /// 引号通常只表达书面排版和对话边界，并不需要被 TTS 读出。真实长文本中，
+    /// 以 `“` 开头的 chunk 容易让模型进入不稳定 prompt，表现为开头文字漏读、
+    /// 长停顿或句尾重复。这里仅移除中文引号，暂不处理英文 `'`，避免误伤
+    /// `don't` 这类英文缩写。
+    private func normalizeQuotationMarks(in text: String) -> String {
+        let quotationMarks: Set<Character> = ["“", "”", "‘", "’", "「", "」", "『", "』"]
+        guard text.contains(where: { quotationMarks.contains($0) }) else { return text }
+        return String(text.filter { !quotationMarks.contains($0) })
     }
 
     /// 将省略号归一化为句子边界。

@@ -29,6 +29,25 @@ final class TextNormalizerTests: XCTestCase {
         XCTAssertEqual(normalizer.normalize("旁白："), "旁白。")
     }
 
+    func testRemovesChineseQuotationMarks() {
+        XCTAssertEqual(
+            normalizer.normalize("“米歇，准确地讲，是在一百三十五万年以前。”"),
+            "米歇，准确地讲，是在一百三十五万年以前。"
+        )
+    }
+
+    func testNormalizesQuotedParagraphBoundaries() {
+        let text = """
+        当我们重新坐好之后，涛就开始了她那奇怪的故事。
+        “米歇，准确地讲，是在一百三十五万年以前。”
+        """
+
+        XCTAssertEqual(
+            normalizer.normalize(text),
+            "当我们重新坐好之后，涛就开始了她那奇怪的故事。 米歇，准确地讲，是在一百三十五万年以前。"
+        )
+    }
+
     func testNormalizesAsciiDashSeparatorsToSentenceBoundary() {
         XCTAssertEqual(
             normalizer.normalize("非常值得一读，---揭示地球史前文明。"),

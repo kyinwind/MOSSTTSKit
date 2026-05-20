@@ -86,7 +86,7 @@ let result = try await tts.speak(
 - 当 `maxGeneratedFrames` 保持为 `nil` 时，MOSSTTSKit 会回退到模型 manifest 里的默认上限，这是普通句子和段落合成时更推荐的行为。
 - 像 `8`、`16`、`32`、`64` 这样的较小帧上限，更适合 smoke test、进度 UI 联调和短句试听。
 
-文本预处理统一放在 `TextNormalizer` 中维护。目前会把省略号和连续破折号转换成句子停顿，把非空换行视为边界，并修正 `Taiguanglin：` 这类结尾悬空标点。新增文本规则时，请参考 [docs/text-normalization.md](./docs/text-normalization.md) 中的工程约定。
+文本预处理统一放在 `TextNormalizer` 中维护。目前会移除中文引号，把省略号和连续破折号转换成句子停顿，把非空换行视为边界，并修正 `Taiguanglin：` 这类结尾悬空标点。新增文本规则时，请参考 [docs/text-normalization.md](./docs/text-normalization.md) 中的工程约定。
 
 ## 自动下载模型
 
