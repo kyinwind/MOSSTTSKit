@@ -238,6 +238,8 @@ for speaker in speakers {
 }
 ```
 
+Voice-rights note: built-in voices are exposed as provided by the upstream model. Some presets, such as `CN 明星` / `zh_11.wav`, may be perceived as resembling a recognizable public figure. Product integrations should consider hiding or warning on such voices unless they have verified authorization for the intended use.
+
 8. Build a cloned speaker from a reference WAV:
 
 ```swift
