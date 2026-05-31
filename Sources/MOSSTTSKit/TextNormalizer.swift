@@ -28,6 +28,7 @@ public struct TextNormalizer: Sendable {
         processed = normalizeDashSeparators(in: processed)
         processed = normalizeLineBreakBoundaries(in: processed)
         processed = normalizeDanglingTerminalPunctuation(in: processed)
+        processed = normalizeChineseOpeningMarkSpacing(in: processed)
         while processed.contains("  ") {
             processed = processed.replacingOccurrences(of: "  ", with: " ")
         }
@@ -177,6 +178,24 @@ public struct TextNormalizer: Sendable {
                 }
             }
             result.append(contentsOf: part)
+        }
+
+        return result
+    }
+
+    /// 清理句末标点和中文开括号/书名号之间的空格。
+    ///
+    /// `---《圣经》` 会先被归一化成 `。 《圣经》`。这个空格对中文朗读没有必要，
+    /// 在极短引用文本前还可能被模型放大成长停顿，所以这里把它收回为 `。《圣经》`。
+    private func normalizeChineseOpeningMarkSpacing(in text: String) -> String {
+        var result = text
+        let openingMarks = ["《", "“", "‘", "「", "『", "（", "【"]
+        let sentenceTerminators = ["。", "！", "？", ".", "!", "?"]
+
+        for terminator in sentenceTerminators {
+            for mark in openingMarks {
+                result = result.replacingOccurrences(of: "\(terminator) \(mark)", with: "\(terminator)\(mark)")
+            }
         }
 
         return result

@@ -55,10 +55,29 @@ final class TextNormalizerTests: XCTestCase {
         )
     }
 
+    func testNormalizesAsciiDashSeparatorAfterSentenceTerminator() {
+        XCTAssertEqual(
+            normalizer.normalize("他们有眼却不看，有耳却不闻。---《圣经》"),
+            "他们有眼却不看，有耳却不闻。《圣经》"
+        )
+    }
+
+    func testNormalizesFullCitationDashSample() {
+        let text = """
+        《海奥华预言》是法国人米谢的外星十日游，非常值得一读，揭示地球史前文明、因果报应、生命轮回、基督来历、黄种人起源、宇宙旅行等。
+        他们有眼却不看，有耳却不闻。---《圣经》
+        """
+
+        XCTAssertEqual(
+            normalizer.normalize(text),
+            "《海奥华预言》是法国人米谢的外星十日游，非常值得一读，揭示地球史前文明、因果报应、生命轮回、基督来历、黄种人起源、宇宙旅行等。 他们有眼却不看，有耳却不闻。《圣经》"
+        )
+    }
+
     func testNormalizesChineseEmDashSeparatorsToSentenceBoundary() {
         XCTAssertEqual(
             normalizer.normalize("他们有眼却不看，有耳却不闻。——《圣经》"),
-            "他们有眼却不看，有耳却不闻。 《圣经》"
+            "他们有眼却不看，有耳却不闻。《圣经》"
         )
     }
 

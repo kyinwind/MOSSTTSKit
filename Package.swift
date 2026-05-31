@@ -37,5 +37,10 @@ let package = Package(
             name: "MOSSTTSKitTests",
             dependencies: ["MOSSTTSKit"]
         ),
+        .executableTarget(
+            name: "MOSSCloneExperimentCLI",
+            dependencies: ["MOSSTTSKit"],
+            path: "Examples/MOSSCloneExperimentCLI"
+        ),
     ]
 )

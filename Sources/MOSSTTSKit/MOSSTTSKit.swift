@@ -454,11 +454,33 @@ public actor MOSSTTSKit {
     public func makeSpeaker(
         name: String,
         referenceAudioURL: URL,
-        maxDuration: TimeInterval? = nil
+        maxDuration: TimeInterval? = nil,
+        referenceAudioProcessing: MOSSReferenceAudioProcessing = .automatic
     ) async throws -> MOSSSpeaker {
+        let preparedAudioURL: URL
+        let temporaryAudioURL: URL?
+
+        switch referenceAudioProcessing {
+        case .automatic:
+            temporaryAudioURL = try ReferenceAudioSegmentSelector.prepareReferenceAudio(
+                at: referenceAudioURL,
+                maxScanDuration: maxDuration ?? options.maxReferenceAudioDuration
+            )
+            preparedAudioURL = temporaryAudioURL ?? referenceAudioURL
+        case .none:
+            temporaryAudioURL = nil
+            preparedAudioURL = referenceAudioURL
+        }
+
+        defer {
+            if let temporaryAudioURL {
+                try? FileManager.default.removeItem(at: temporaryAudioURL)
+            }
+        }
+
         let encoding = try await audioTokenizer.encode(
-            audioPath: referenceAudioURL.path,
-            maxDuration: maxDuration ?? options.maxReferenceAudioDuration
+            audioPath: preparedAudioURL.path,
+            maxDuration: temporaryAudioURL == nil ? maxDuration ?? options.maxReferenceAudioDuration : nil
         )
         let referenceAudioCodes = trimReferenceAudioCodes(encoding.codes, options: options)
         return MOSSSpeaker(
