@@ -848,7 +848,7 @@ public actor MOSSTTSKit {
 
     private func estimateInterChunkPauseSeconds(for textChunk: String) -> Double {
         let wordCount = textChunk.split(separator: " ").count
-        return wordCount <= 4 ? 0.40 : 0.24
+        return wordCount <= 4 ? 0.10 : 0.05
     }
 
     private func resolvedMaxFrames(options: MOSSTTSOptions, manifest: MOSSBrowserManifest) -> Int {
