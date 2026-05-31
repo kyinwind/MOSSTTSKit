@@ -310,11 +310,16 @@ public actor MOSSTTSKit {
                     for (index, chunkText) in textChunks.enumerated() {
                         let textEncoding = try await self.textTokenizer.encode(chunkText)
                         let textTokens = textEncoding.ids.map { Int32($0) }
+                        let chunkMaxFrames = self.resolvedMaxFrames(
+                            options: opts,
+                            manifest: manifest,
+                            processedText: chunkText
+                        )
                         let codeStream = await self.engine.streamAudioCodes(
                             textTokenIds: textTokens,
                             promptAudioCodes: promptAudioCodes,
                             manifest: manifest,
-                            maxFrames: maxFrames,
+                            maxFrames: chunkMaxFrames,
                             seed: opts.seed,
                             randomSource: randomSource,
                             assistantRandomU: nil,
@@ -561,7 +566,7 @@ public actor MOSSTTSKit {
     ) async throws -> TTSResult {
         let textEncoding = try await textTokenizer.encode(processedText)
         let textTokens = textEncoding.ids.map { Int32($0) }
-        let maxFrames = resolvedMaxFrames(options: options, manifest: manifest)
+        let maxFrames = resolvedMaxFrames(options: options, manifest: manifest, processedText: processedText)
         let sampleRate = audioTokenizer.sampleRate
         let channels = options.channels
 
@@ -873,10 +878,26 @@ public actor MOSSTTSKit {
         return wordCount <= 4 ? 0.10 : 0.05
     }
 
-    private func resolvedMaxFrames(options: MOSSTTSOptions, manifest: MOSSBrowserManifest) -> Int {
+    private func resolvedMaxFrames(
+        options: MOSSTTSOptions,
+        manifest: MOSSBrowserManifest,
+        processedText: String? = nil
+    ) -> Int {
         let optionLimit = options.maxGeneratedFrames ?? options.maxLength
         let manifestLimit = manifest.generationDefaults.maxNewFrames ?? optionLimit
-        return max(1, min(optionLimit, manifestLimit, options.maxLength))
+        let baseLimit = max(1, min(optionLimit, manifestLimit, options.maxLength))
+        guard options.maxGeneratedFrames == nil, let processedText else {
+            return baseLimit
+        }
+        return min(baseLimit, estimatedFrameLimit(for: processedText))
+    }
+
+    private func estimatedFrameLimit(for processedText: String) -> Int {
+        let meaningfulCharacterCount = processedText
+            .filter { !$0.isWhitespace && !$0.isPunctuation }
+            .count
+        let punctuationSlack = processedText.filter(\.isPunctuation).count * 2
+        return max(16, meaningfulCharacterCount * 4 + punctuationSlack + 8)
     }
     
     private func adaptChannels(_ samples: [Float], from sourceChannels: Int, to targetChannels: Int) -> [Float] {

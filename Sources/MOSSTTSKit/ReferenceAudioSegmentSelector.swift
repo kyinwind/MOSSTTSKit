@@ -79,7 +79,7 @@ enum ReferenceAudioSegmentSelector {
             sampleCount: samples.count,
             minimumSampleCount: Int(configuration.minimumSpeechRegionDuration * Double(sampleRate))
         )
-        guard let bestRegion = bestRegion(regions, rmsValues: rmsValues, windowSize: windowSize, targetSampleCount: targetSampleCount) else {
+        guard let bestRegion = firstUsableRegion(regions) else {
             return nil
         }
 
@@ -161,30 +161,8 @@ enum ReferenceAudioSegmentSelector {
         return regions
     }
 
-    private static func bestRegion(
-        _ regions: [Range<Int>],
-        rmsValues: [Float],
-        windowSize: Int,
-        targetSampleCount: Int
-    ) -> Range<Int>? {
-        regions.max { left, right in
-            score(region: left, rmsValues: rmsValues, windowSize: windowSize, targetSampleCount: targetSampleCount)
-                < score(region: right, rmsValues: rmsValues, windowSize: windowSize, targetSampleCount: targetSampleCount)
-        }
-    }
-
-    private static func score(
-        region: Range<Int>,
-        rmsValues: [Float],
-        windowSize: Int,
-        targetSampleCount: Int
-    ) -> Float {
-        let startWindow = max(0, region.lowerBound / windowSize)
-        let endWindow = min(rmsValues.count, max(startWindow + 1, Int(ceil(Double(region.upperBound) / Double(windowSize)))))
-        let averageRMS = rmsValues[startWindow..<endWindow].reduce(Float(0), +) / Float(max(1, endWindow - startWindow))
-        let usableLength = Float(min(region.count, targetSampleCount)) / Float(max(1, targetSampleCount))
-        let startPenalty = Float(region.lowerBound) / Float(max(1, targetSampleCount)) * 0.02
-        return usableLength + averageRMS - startPenalty
+    private static func firstUsableRegion(_ regions: [Range<Int>]) -> Range<Int>? {
+        regions.first
     }
 
     private static func loadMonoAudio(at url: URL, maxDuration: TimeInterval?) throws -> (samples: [Float], sampleRate: Int) {
